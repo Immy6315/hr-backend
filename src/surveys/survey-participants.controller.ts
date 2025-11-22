@@ -1,0 +1,135 @@
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Req,
+  UploadedFile,
+  UseGuards,
+  UseInterceptors,
+} from '@nestjs/common';
+import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { Roles } from '../auth/roles.decorator';
+import { UserRole } from '../users/schemas/user.schema';
+import { SurveyParticipantsService } from './survey-participants.service';
+import { CreateSurveyParticipantDto, UpdateSurveyParticipantDto } from './dto/create-participant.dto';
+import { FileInterceptor } from '@nestjs/platform-express';
+
+@ApiTags('survey-participants')
+@Controller('survey-builder/surveys/:surveyId/participants')
+@UseGuards(JwtAuthGuard)
+@ApiBearerAuth()
+export class SurveyParticipantsController {
+  constructor(private readonly participantsService: SurveyParticipantsService) {}
+
+  private buildAccessContext(req: any) {
+    return {
+      userId: req.user.userId,
+      role: req.user.role,
+      organizationId: req.user.organizationId || req.user.user?.organizationId?.toString(),
+    };
+  }
+
+  @Get()
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN, UserRole.ORG_SUB_ADMIN)
+  @ApiOperation({ summary: 'List participants for a survey' })
+  async findAll(
+    @Param('surveyId') surveyId: string,
+    @Query('page') page = '1',
+    @Query('limit') limit = '10',
+    @Query('search') search: string = '',
+    @Query('status') status: string = 'all',
+    @Req() req: any,
+  ) {
+    const normalizedSearch = search?.trim() || undefined;
+    const normalizedStatus = status && status !== 'all' ? status : undefined;
+
+    const result = await this.participantsService.findAll(surveyId, this.buildAccessContext(req), {
+      page: Number(page) || 1,
+      limit: Number(limit) || 10,
+      search: normalizedSearch,
+      status: normalizedStatus,
+    });
+    return {
+      message: 'Participants fetched successfully',
+      data: result.data,
+      meta: {
+        page: result.pagination.page,
+        limit: result.pagination.limit,
+        total: result.pagination.total,
+        totalPages: result.pagination.totalPages,
+        summary: result.summary,
+      },
+    };
+  }
+
+  @Post()
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN, UserRole.ORG_SUB_ADMIN)
+  @ApiOperation({ summary: 'Create a participant' })
+  async create(
+    @Param('surveyId') surveyId: string,
+    @Body() dto: CreateSurveyParticipantDto,
+    @Req() req: any,
+  ) {
+    const participant = await this.participantsService.create(surveyId, dto, this.buildAccessContext(req));
+    return {
+      message: 'Participant created successfully',
+      data: participant,
+    };
+  }
+
+  @Patch(':participantId')
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN, UserRole.ORG_SUB_ADMIN)
+  @ApiOperation({ summary: 'Update a participant' })
+  async update(
+    @Param('surveyId') surveyId: string,
+    @Param('participantId') participantId: string,
+    @Body() dto: UpdateSurveyParticipantDto,
+    @Req() req: any,
+  ) {
+    const participant = await this.participantsService.update(
+      surveyId,
+      participantId,
+      dto,
+      this.buildAccessContext(req),
+    );
+    return {
+      message: 'Participant updated successfully',
+      data: participant,
+    };
+  }
+
+  @Delete(':participantId')
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN, UserRole.ORG_SUB_ADMIN)
+  @ApiOperation({ summary: 'Delete a participant' })
+  async remove(@Param('surveyId') surveyId: string, @Param('participantId') participantId: string, @Req() req: any) {
+    await this.participantsService.remove(surveyId, participantId, this.buildAccessContext(req));
+    return {
+      message: 'Participant removed successfully',
+    };
+  }
+
+  @Post('upload')
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN, UserRole.ORG_SUB_ADMIN)
+  @ApiOperation({ summary: 'Bulk upload participants via Excel' })
+  @UseInterceptors(FileInterceptor('file'))
+  @ApiResponse({ status: 201, description: 'Participants imported successfully' })
+  async upload(
+    @Param('surveyId') surveyId: string,
+    @UploadedFile() file: Express.Multer.File,
+    @Req() req: any,
+  ) {
+    const result = await this.participantsService.bulkUpload(surveyId, file, this.buildAccessContext(req));
+    return {
+      message: 'Participants imported successfully',
+      data: result,
+    };
+  }
+}
+
+
