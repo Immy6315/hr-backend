@@ -20,7 +20,7 @@ import { Public } from './public.decorator';
 @ApiTags('auth')
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(private readonly authService: AuthService) { }
 
   @Public()
   @ApiOperation({ summary: 'User login' })
@@ -117,6 +117,9 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   async validateToken(@Req() req) {
+    // Fetch fresh user data from database to get latest permissions
+    const user = await this.authService['usersService'].findById(req.user.userId);
+
     return {
       valid: true,
       message: 'Token is valid',
@@ -125,7 +128,8 @@ export class AuthController {
         email: req.user.email,
         role: req.user.role,
         organizationId: req.user.organizationId || req.user.user?.organizationId || null,
-        permissions: req.user.permissions || req.user.user?.permissions || [],
+        // Use fresh permissions from database instead of token
+        permissions: user?.permissions || [],
       },
     };
   }

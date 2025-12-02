@@ -4,6 +4,7 @@ import { FilterQuery, Model, Types } from 'mongoose';
 import { SurveyParticipant } from './schemas/survey-participant.schema';
 import { CreateSurveyParticipantDto, UpdateSurveyParticipantDto } from './dto/create-participant.dto';
 import { SurveysService } from './surveys.service';
+import { EmailService } from '../email/email.service';
 import * as XLSX from 'xlsx';
 
 interface AccessContext {
@@ -18,7 +19,8 @@ export class SurveyParticipantsService {
     @InjectModel(SurveyParticipant.name)
     private readonly participantModel: Model<SurveyParticipant>,
     private readonly surveysService: SurveysService,
-  ) {}
+    private readonly emailService: EmailService,
+  ) { }
 
   private normalizeStatus(status?: string) {
     if (!status) {
@@ -63,18 +65,51 @@ export class SurveyParticipantsService {
   async create(surveyId: string, dto: CreateSurveyParticipantDto, ctx: AccessContext) {
     await this.ensureSurveyAccess(surveyId, ctx);
 
+    // Import credential generation utility
+    const { generateCredentials } = await import('./utils/credentials.util');
+
+    // Generate credentials for the respondent (they will login to complete the survey)
+    const credentials = await generateCredentials(dto.respondentEmail);
+    const normalizedEmail = dto.respondentEmail.trim().toLowerCase();
+
+    // Find all existing participants with the same respondent email (across all surveys)
+    // We will update their password to match the new one so the user has ONE password for all surveys
+    await this.participantModel.updateMany(
+      {
+        respondentEmail: normalizedEmail,
+        isDeleted: false,
+      },
+      {
+        $set: {
+          password: credentials.hashedPassword,
+        },
+      },
+    );
+
     const participant = new this.participantModel({
       surveyId: new Types.ObjectId(surveyId),
       participantName: dto.participantName.trim(),
       participantEmail: dto.participantEmail?.trim().toLowerCase(),
       respondentName: dto.respondentName.trim(),
-      respondentEmail: dto.respondentEmail.trim().toLowerCase(),
+      respondentEmail: normalizedEmail,
       relationship: dto.relationship?.trim(),
-      completionStatus: this.normalizeStatus(dto.completionStatus),
+      completionStatus: this.normalizeStatus(dto.completionStatus) || 'Yet To Start',
       completionDate: this.parseCompletionDate(dto.completionDate),
+      // Auto-generated credential fields
+      username: credentials.username,
+      password: credentials.hashedPassword, // Store hashed password
+      hasLoggedIn: false,
+      remindersSent: 0,
+      isLocked: false,
     });
 
-    return participant.save();
+    const saved = await participant.save();
+
+    // Return the participant object along with the plain password for email sending
+    return {
+      participant: saved,
+      plainPassword: credentials.password, // Plain password to be sent via email
+    };
   }
 
   async findAll(
@@ -194,19 +229,36 @@ export class SurveyParticipantsService {
 
   async remove(surveyId: string, participantId: string, ctx: AccessContext) {
     await this.ensureSurveyAccess(surveyId, ctx);
-    const participant = await this.participantModel.findOneAndUpdate(
-      {
-        _id: participantId,
-        surveyId: new Types.ObjectId(surveyId),
-        isDeleted: false,
-      },
-      { isDeleted: true },
-      { new: true },
-    );
+
+    // Find participant first (before deletion)
+    const participant = await this.participantModel.findOne({
+      _id: participantId,
+      surveyId: new Types.ObjectId(surveyId),
+      isDeleted: false,
+    });
 
     if (!participant) {
       throw new NotFoundException('Participant not found');
     }
+
+    // Send cancellation email if Respondent (not Self)
+    if (participant.relationship && participant.relationship.toLowerCase() !== 'self') {
+      try {
+        const survey = await this.surveysService.findOne(surveyId, ctx);
+        const template = survey.communicationTemplates?.respondentCancellation;
+
+        if (template) {
+          await this.emailService.sendSurveyCancellation(participant, survey, template);
+        }
+      } catch (error) {
+        // Log error but don't block deletion
+        console.error('Failed to send cancellation email:', error);
+      }
+    }
+
+    // Proceed with deletion
+    participant.isDeleted = true;
+    await participant.save();
 
     return participant;
   }
@@ -230,7 +282,7 @@ export class SurveyParticipantsService {
     const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
 
     if (!rows.length) {
-      return { imported: 0, skipped: 0 };
+      return { imported: 0, skipped: 0, participantsWithCredentials: [] };
     }
 
     const normalizeKey = (value: string) =>
@@ -238,6 +290,10 @@ export class SurveyParticipantsService {
 
     let imported = 0;
     let skipped = 0;
+    const participantsWithCredentials: Array<{
+      participant: any;
+      plainPassword: string;
+    }> = [];
 
     for (const row of rows as Record<string, string>[]) {
       const entries = Object.entries(row).reduce<Record<string, string>>((acc, [key, value]) => {
@@ -264,11 +320,12 @@ export class SurveyParticipantsService {
         completionDate: entries['completiondate']?.toString(),
       };
 
-      await this.create(surveyId, dto, ctx);
+      const result = await this.create(surveyId, dto, ctx);
+      participantsWithCredentials.push(result as any);
       imported += 1;
     }
 
-    return { imported, skipped };
+    return { imported, skipped, participantsWithCredentials };
   }
 
   async findPendingParticipants(surveyId: string) {

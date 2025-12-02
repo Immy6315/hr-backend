@@ -19,13 +19,17 @@ import { UserRole } from '../users/schemas/user.schema';
 import { SurveyParticipantsService } from './survey-participants.service';
 import { CreateSurveyParticipantDto, UpdateSurveyParticipantDto } from './dto/create-participant.dto';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { ReminderService } from './reminder.service';
 
 @ApiTags('survey-participants')
 @Controller('survey-builder/surveys/:surveyId/participants')
 @UseGuards(JwtAuthGuard)
 @ApiBearerAuth()
 export class SurveyParticipantsController {
-  constructor(private readonly participantsService: SurveyParticipantsService) {}
+  constructor(
+    private readonly participantsService: SurveyParticipantsService,
+    private readonly reminderService: ReminderService,
+  ) { }
 
   private buildAccessContext(req: any) {
     return {
@@ -128,6 +132,47 @@ export class SurveyParticipantsController {
     return {
       message: 'Participants imported successfully',
       data: result,
+    };
+  }
+
+  @Get('remindable')
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN, UserRole.ORG_SUB_ADMIN)
+  @ApiOperation({ summary: 'Get participants eligible for reminders' })
+  async getRemindableParticipants(@Param('surveyId') surveyId: string) {
+    const participants = await this.reminderService.getReminderEligibleParticipants(surveyId);
+    return {
+      message: 'Reminder-eligible participants fetched',
+      data: participants,
+    };
+  }
+
+  @Post('send-reminders')
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN, UserRole.ORG_SUB_ADMIN)
+  @ApiOperation({ summary: 'Send bulk reminders to selected participants' })
+  async sendReminders(
+    @Param('surveyId') surveyId: string,
+    @Body('participantIds') participantIds: string[],
+    @Req() req: any,
+  ) {
+    const result = await this.reminderService.sendBulkReminders(
+      surveyId,
+      participantIds,
+      this.buildAccessContext(req),
+    );
+    return {
+      message: 'Reminders sending process completed',
+      data: result,
+    };
+  }
+
+  @Get('reminder-stats')
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN, UserRole.ORG_SUB_ADMIN)
+  @ApiOperation({ summary: 'Get reminder statistics for the survey' })
+  async getReminderStats(@Param('surveyId') surveyId: string) {
+    const stats = await this.reminderService.getReminderStats(surveyId);
+    return {
+      message: 'Reminder statistics fetched',
+      data: stats,
     };
   }
 }

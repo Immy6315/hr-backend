@@ -10,8 +10,8 @@ export enum UserSurveyStatus {
 
 @Schema({ timestamps: true })
 export class UserSurvey extends Document {
-  @Prop({ type: Types.ObjectId, ref: 'User', required: false, index: true })
-  userId?: Types.ObjectId; // Optional for IP-based surveys
+  @Prop({ type: String, required: false, index: true })
+  userId?: string; // Optional, can be ObjectId string or email
 
   @Prop({ type: Types.ObjectId, ref: 'Survey', required: true, index: true })
   surveyId: Types.ObjectId;

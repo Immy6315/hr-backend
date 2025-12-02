@@ -20,6 +20,7 @@ export class RabbitMQService implements OnModuleInit, OnModuleDestroy {
   private connection: amqp.Connection | null = null;
   private channel: amqp.Channel | null = null;
   private isConnected = false;
+  private isReady = false;
   private isReconnecting = false;
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
@@ -43,7 +44,6 @@ export class RabbitMQService implements OnModuleInit, OnModuleDestroy {
       await this.setupQueues();
     }
   }
-
   async onModuleDestroy() {
     await this.disconnect();
   }
@@ -109,12 +109,11 @@ export class RabbitMQService implements OnModuleInit, OnModuleDestroy {
       await this.connect();
       if (this.isConnected) {
         await this.setupQueues();
-      } else {
-        // If connection failed, handleReconnect will be called again by the catch block in connect()
-        // But we need to make sure we don't get stuck if connect() doesn't throw but fails silently (unlikely)
       }
     }, delay);
   }
+
+
 
   private async setupQueues(): Promise<void> {
     if (!this.channel) {
@@ -167,6 +166,7 @@ export class RabbitMQService implements OnModuleInit, OnModuleDestroy {
 
       await this.channel.prefetch(1);
 
+      this.isReady = true;
       this.logger.log('✅ RabbitMQ queues and exchanges setup completed');
     } catch (error) {
       this.logger.error('❌ Failed to setup queues:', error);
@@ -231,6 +231,10 @@ export class RabbitMQService implements OnModuleInit, OnModuleDestroy {
 
   isChannelReady(): boolean {
     return this.isConnected && this.channel !== null;
+  }
+
+  isQueueReady(): boolean {
+    return this.isReady;
   }
 
   async getQueueStatus(): Promise<any> {

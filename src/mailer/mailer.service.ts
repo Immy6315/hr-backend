@@ -22,15 +22,24 @@ export class MailerService {
       this.logger.warn('⚠️ SMTP credentials not configured. Email sending will fail.');
     }
 
-    const transporter = nodemailer.createTransport({
+    this.logger.log(`🔌 Configuring SMTP Transporter: Host=${host}, Port=${port}, User=${user ? '***' : 'None'}`);
+
+
+    const transportConfig: any = {
       host,
       port,
-      secure: port === 465,
+      secure: Number(port) === 465,
       auth: {
         user,
         pass,
       },
-    });
+    };
+
+    if (host === 'smtp.gmail.com') {
+      transportConfig.service = 'gmail';
+    }
+
+    const transporter = nodemailer.createTransport(transportConfig);
 
     // Verify connection asynchronously (non-blocking)
     setImmediate(async () => {
@@ -63,18 +72,18 @@ export class MailerService {
       };
 
       const result = await this.transporter.sendMail(mailOptions);
-      
+
       this.logger.log(`✅ Email sent successfully to ${options.to} (Message ID: ${result.messageId})`);
       return true;
     } catch (error: any) {
       this.logger.error(`❌ Error sending email to ${options.to}:`, error.message);
-      
+
       if (error.code === 'EAUTH') {
         this.logger.error('❌ SMTP Authentication failed. Check SMTP credentials.');
       } else if (error.code === 'ECONNECTION') {
         this.logger.error('❌ SMTP Connection failed. Check SMTP host and port.');
       }
-      
+
       throw error;
     }
   }

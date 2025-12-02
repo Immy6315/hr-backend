@@ -13,7 +13,7 @@ export class UserSurveysService {
     @InjectModel(UserSurvey.name) private userSurveyModel: Model<UserSurvey>,
     @InjectModel(Survey.name) private surveyModel: Model<Survey>,
     private surveysService: SurveysService,
-  ) {}
+  ) { }
 
   async create(
     userId: string,
@@ -30,9 +30,9 @@ export class UserSurveysService {
       surveyId: new Types.ObjectId(createUserSurveyDto.surveyId),
       isDeleted: false,
     };
-    
+
     if (userId && userId.trim() !== '') {
-      query.userId = new Types.ObjectId(userId);
+      query.userId = userId;
     } else {
       query.userId = null; // For IP-based surveys
     }
@@ -71,7 +71,7 @@ export class UserSurveysService {
 
     // Only set userId if provided
     if (userId && userId.trim() !== '') {
-      userSurveyData.userId = new Types.ObjectId(userId);
+      userSurveyData.userId = userId;
     }
 
     const userSurvey = new this.userSurveyModel(userSurveyData);
@@ -92,7 +92,7 @@ export class UserSurveysService {
     const query: any = { isDeleted: false };
 
     if (userId) {
-      query.userId = new Types.ObjectId(userId);
+      query.userId = userId;
     }
     if (surveyId) {
       query.surveyId = new Types.ObjectId(surveyId);
@@ -117,10 +117,20 @@ export class UserSurveysService {
   async findByUserAndSurvey(userId: string, surveyId: string): Promise<UserSurvey | null> {
     return this.userSurveyModel
       .findOne({
-        userId: new Types.ObjectId(userId),
+        userId: userId,
         surveyId: new Types.ObjectId(surveyId),
         isDeleted: false,
       })
+      .exec();
+  }
+
+  async findBySurvey(surveyId: string): Promise<UserSurvey[]> {
+    return this.userSurveyModel
+      .find({
+        surveyId: new Types.ObjectId(surveyId),
+        isDeleted: false,
+      })
+      .sort({ createdAt: -1 })
       .exec();
   }
 
@@ -158,7 +168,7 @@ export class UserSurveysService {
     // Check IP limit
     const ipLimit = survey.ipResponseLimit || 1;
     const existingCount = await this.countByIpAndSurvey(ipAddress, createUserSurveyDto.surveyId);
-    
+
     if (existingCount >= ipLimit) {
       // Return the most recent existing UserSurvey
       const existing = await this.findByIpAndSurvey(ipAddress, createUserSurveyDto.surveyId);
@@ -225,7 +235,7 @@ export class UserSurveysService {
     },
   ): Promise<UserSurvey> {
     const userSurvey = await this.findOne(id);
-    
+
     // Generate response ID if not already set
     if (!userSurvey.responseId) {
       let responseId = this.generateResponseId();

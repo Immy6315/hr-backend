@@ -10,7 +10,10 @@ import {
   Req,
   UsePipes,
   ValidationPipe,
+  Res,
+  StreamableFile,
 } from '@nestjs/common';
+import { Response } from 'express';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { UserSurveyResponsesService } from './user-survey-responses.service';
 import { CreateResponseDto } from './dto/create-response.dto';
@@ -21,7 +24,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 export class UserSurveyResponsesController {
   constructor(
     private readonly responsesService: UserSurveyResponsesService,
-  ) {}
+  ) { }
 
   @Post()
   @UseGuards(JwtAuthGuard)
@@ -58,6 +61,39 @@ export class UserSurveyResponsesController {
     return this.responsesService.findByUserSurvey(userSurveyId);
   }
 
+  @Get('analytics/:surveyId')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get analytics for a survey' })
+  @ApiResponse({ status: 200, description: 'Survey analytics' })
+  async getSurveyAnalytics(
+    @Param('surveyId') surveyId: string,
+  ) {
+    return this.responsesService.getSurveyAnalytics(surveyId);
+  }
+
+  @Get('surveys/:surveyId/overview')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get survey overview stats' })
+  @ApiResponse({ status: 200, description: 'Survey overview stats' })
+  async getSurveyOverview(
+    @Param('surveyId') surveyId: string,
+  ) {
+    return this.responsesService.getSurveyOverview(surveyId);
+  }
+
+  @Get('surveys/:surveyId/participants')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get survey participants list' })
+  @ApiResponse({ status: 200, description: 'Survey participants' })
+  async getSurveyParticipants(
+    @Param('surveyId') surveyId: string,
+  ) {
+    return this.responsesService.getSurveyParticipants(surveyId);
+  }
+
   @Get('analytics/:surveyId/:questionId')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
@@ -68,6 +104,33 @@ export class UserSurveyResponsesController {
     @Param('questionId') questionId: string,
   ) {
     return this.responsesService.getQuestionAnalytics(surveyId, questionId);
+  }
+
+  @Get('export/:surveyId/:questionId')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Export responses for a specific question' })
+  async exportQuestionResponses(
+    @Param('surveyId') surveyId: string,
+    @Param('questionId') questionId: string,
+    @Res() res: Response,
+  ) {
+    const filePath = await this.responsesService.exportQuestionResponses(surveyId, questionId);
+
+    res.download(filePath, `responses-${questionId}.xlsx`, (err) => {
+      if (err) {
+        console.error('Download error:', err);
+      }
+      // Delete file after download (or error)
+      const fs = require('fs');
+      try {
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+        }
+      } catch (cleanupErr) {
+        console.error('Error deleting temp file:', cleanupErr);
+      }
+    });
   }
 
   @Get(':id')
@@ -90,4 +153,3 @@ export class UserSurveyResponsesController {
     return { message: 'Response deleted successfully' };
   }
 }
-

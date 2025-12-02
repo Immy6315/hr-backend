@@ -3,8 +3,8 @@ import { Document, Types } from 'mongoose';
 
 @Schema({ timestamps: true })
 export class UserSurveyResponse extends Document {
-  @Prop({ type: Types.ObjectId, ref: 'User', required: false, index: true })
-  userId?: Types.ObjectId; // Optional for IP-based surveys
+  @Prop({ type: String, required: false, index: true })
+  userId?: string; // Optional for IP-based surveys, can be email for participants
 
   @Prop({ type: Types.ObjectId, ref: 'Survey', required: true, index: true })
   surveyId: Types.ObjectId;

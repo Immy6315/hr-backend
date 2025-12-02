@@ -360,15 +360,25 @@ export class EmailTemplateContentDto {
   @IsNotEmpty()
   subject: string;
 
-  @ApiProperty()
+  @ApiProperty({ required: false })
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  html: string;
+  html?: string;
 
   @ApiProperty()
   @IsString()
   @IsNotEmpty()
   text: string;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsString()
+  label?: string;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsString()
+  description?: string;
 }
 
 export class CommunicationTemplatesDto {

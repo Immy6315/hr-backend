@@ -15,6 +15,7 @@ import { UserSurvey, UserSurveyStatus } from './schemas/user-survey.schema';
 import { CreateSurveyDto } from './dto/create-survey.dto';
 import { UpdateSurveyDto } from './dto/update-survey.dto';
 import { SurveyAuditLogService } from './survey-audit-log.service';
+import { ReminderService } from './reminder.service';
 import { AuditLogAction, AuditLogEntityType } from './schemas/survey-audit-log.schema';
 import * as XLSX from 'xlsx';
 
@@ -26,7 +27,9 @@ export class SurveysService {
     @InjectModel(UserSurvey.name) private userSurveyModel: Model<UserSurvey>,
     @Inject(forwardRef(() => SurveyAuditLogService))
     private auditLogService: SurveyAuditLogService,
-  ) {}
+    @Inject(forwardRef(() => ReminderService))
+    private reminderService: ReminderService,
+  ) { }
 
   async create(
     createSurveyDto: CreateSurveyDto,
@@ -162,10 +165,10 @@ export class SurveysService {
     userContext?:
       | string
       | {
-          userId?: string;
-          role?: any;
-          organizationId?: string | null;
-        },
+        userId?: string;
+        role?: any;
+        organizationId?: string | null;
+      },
   ): Promise<any> {
     const survey = await this.surveyModel
       .findOne({ _id: id, isDeleted: false })
@@ -204,7 +207,7 @@ export class SurveysService {
         } else {
           // For participants/other roles, fall back to strict createdBy check when userId present
           if (ctx.userId && survey.createdBy && survey.createdBy.toString() !== ctx.userId) {
-      throw new ForbiddenException('You do not have permission to access this survey');
+            throw new ForbiddenException('You do not have permission to access this survey');
           }
         }
       }
@@ -355,11 +358,11 @@ export class SurveysService {
     const ratingScaleFromMetadata =
       Array.isArray(question.metadata?.ratingScale) && question.metadata.ratingScale.length
         ? question.metadata.ratingScale.map((scale: any, index: number) => ({
-            text: scale.label || scale.description || scale.text || `Option ${index + 1}`,
-            weight: scale.weight ?? scale.value ?? scale.scale ?? index + 1,
-            value: scale.value ?? scale.weight ?? scale.scale ?? index + 1,
-            uniqueOrder: scale.uniqueOrder ?? index.toString(),
-          }))
+          text: scale.label || scale.description || scale.text || `Option ${index + 1}`,
+          weight: scale.weight ?? scale.value ?? scale.scale ?? index + 1,
+          value: scale.value ?? scale.weight ?? scale.scale ?? index + 1,
+          uniqueOrder: scale.uniqueOrder ?? index.toString(),
+        }))
         : null;
 
     const matrixColumnSources = [
@@ -386,25 +389,25 @@ export class SurveysService {
           typeof col.weight === 'number'
             ? col.weight
             : typeof col.score === 'number'
-            ? col.score
-            : typeof col.scale === 'number'
-            ? col.scale
-            : !Number.isNaN(Number(rawValue))
-            ? Number(rawValue)
-            : index + 1;
+              ? col.score
+              : typeof col.scale === 'number'
+                ? col.scale
+                : !Number.isNaN(Number(rawValue))
+                  ? Number(rawValue)
+                  : index + 1;
 
         return {
           text: col.text || col.label || col.description || (typeof col === 'string' ? col : ''),
           uniqueOrder: col.uniqueOrder?.toString() ?? col.seqNo?.toString() ?? index.toString(),
-        mandatoryEnabled: col.mandatoryEnabled || false,
-        questionId: col.questionId || null,
-        rowId: col.rowId || null,
+          mandatoryEnabled: col.mandatoryEnabled || false,
+          questionId: col.questionId || null,
+          rowId: col.rowId || null,
           weight: numericWeight,
           seqNo: col.seqNo ?? index,
           value: rawValue?.toString() ?? index.toString(),
           id: col.id || col._id || this.generateId(),
-        createdAt: col.createdAt || new Date(),
-        updatedAt: col.updatedAt || new Date(),
+          createdAt: col.createdAt || new Date(),
+          updatedAt: col.updatedAt || new Date(),
         };
       });
       formatted.columns = normalizedColumns;
@@ -490,10 +493,10 @@ export class SurveysService {
         ...(includeWeights && item.weight !== undefined
           ? { weight: Number(item.weight) }
           : includeWeights && item.weight === undefined && item.value !== undefined
-          ? { weight: Number(item.value) }
-          : includeWeights
-          ? { weight: idx + 1 }
-          : {}),
+            ? { weight: Number(item.value) }
+            : includeWeights
+              ? { weight: idx + 1 }
+              : {}),
       }));
 
     return {
@@ -569,14 +572,82 @@ export class SurveysService {
             entityName: survey.name,
           },
         );
+
+        // Auto-set startDate to now if not already set
+        if (!survey.startDate) {
+          survey.startDate = new Date();
+        }
+
+        // Auto-send emails to all eligible participants
+        try {
+          const eligibleParticipants = await this.reminderService.getReminderEligibleParticipants(id);
+
+          if (eligibleParticipants.length > 0) {
+            const participantIds = eligibleParticipants.map(p => p._id.toString());
+
+            // Send emails (invites for new participants, reminders for existing ones)
+            const result = await this.reminderService.sendBulkReminders(
+              id,
+              participantIds,
+              {
+                userId,
+                role: 'admin',
+                organizationId: survey.organizationId?.toString()
+              }
+            );
+
+            console.log(`✅ Auto-sent emails on survey activation: ${result.sent} sent, ${result.failed} failed, ${result.ineligible} ineligible`);
+          } else {
+            console.log('ℹ️ No eligible participants to send emails to on survey activation');
+          }
+        } catch (error) {
+          // Don't block survey activation if emails fail
+          console.error(`⚠️ Failed to auto-send emails on activation: ${error.message}`);
+        }
       }
       survey.status = updateSurveyDto.status;
     }
     if (updateSurveyDto.description !== undefined) survey.description = updateSurveyDto.description;
-    if (updateSurveyDto.startDate !== undefined) survey.startDate = updateSurveyDto.startDate;
-    if (updateSurveyDto.endDate !== undefined) survey.endDate = updateSurveyDto.endDate;
+    if (updateSurveyDto.communicationTemplates !== undefined) survey.communicationTemplates = updateSurveyDto.communicationTemplates as any;
+
+    // Only update dates if they are valid Date objects (not empty objects {})
+    if (updateSurveyDto.startDate !== undefined) {
+      if (updateSurveyDto.startDate instanceof Date || typeof updateSurveyDto.startDate === 'string') {
+        survey.startDate = updateSurveyDto.startDate;
+      }
+    }
+    if (updateSurveyDto.endDate !== undefined) {
+      if (updateSurveyDto.endDate instanceof Date || typeof updateSurveyDto.endDate === 'string') {
+        survey.endDate = updateSurveyDto.endDate;
+      }
+    }
 
     const updatedSurvey = await survey.save();
+
+    // Auto-send emails if status changed to active
+    if (oldValue.status !== 'active' && updatedSurvey.status === 'active' && userId) {
+      try {
+        const eligibleParticipants = await this.reminderService.getReminderEligibleParticipants(id);
+        if (eligibleParticipants.length > 0) {
+          const participantIds = eligibleParticipants.map(p => p._id.toString());
+
+          // Use super_admin role to ensure internal call succeeds (permission already verified above)
+          await this.reminderService.sendBulkReminders(
+            id,
+            participantIds,
+            {
+              userId,
+              role: 'super_admin',
+              organizationId: updatedSurvey.organizationId?.toString()
+            }
+          );
+          console.log(`Auto-sent emails to ${participantIds.length} participants for survey ${id}`);
+        }
+      } catch (error) {
+        console.error(`Failed to auto-send emails on activation for survey ${id}:`, error);
+        // We don't throw here to avoid rolling back the activation if email fails
+      }
+    }
 
     // Log survey update
     if (userId) {
@@ -634,12 +705,12 @@ export class SurveysService {
       $text: { $search: searchTerm },
       isDeleted: false,
     };
-    
+
     // Filter by user if userId is provided
     if (userId) {
       query.createdBy = userId;
     }
-    
+
     return this.surveyModel
       .find(query)
       .limit(limit)
@@ -735,10 +806,10 @@ export class SurveysService {
       const options =
         optionsRaw && typeof optionsRaw === 'string'
           ? optionsRaw
-              .split('|')
-              .map((opt: string) => opt.trim())
-              .filter((opt: string) => opt.length > 0)
-              .map((text: string) => ({ text }))
+            .split('|')
+            .map((opt: string) => opt.trim())
+            .filter((opt: string) => opt.length > 0)
+            .map((text: string) => ({ text }))
           : undefined;
 
       const mandatoryEnabled = isRequiredRaw === 'yes' || isRequiredRaw === 'true' || isRequiredRaw === '1';
@@ -751,11 +822,31 @@ export class SurveysService {
       });
     });
 
+    // Parse Communication sheet if it exists
+    let communicationTemplates: any = undefined;
+    const communicationSheetName = workbook.SheetNames.find(
+      (name) => name.toLowerCase() === 'communication' || name.toLowerCase() === 'communications',
+    );
+
+    if (communicationSheetName) {
+      const commSheet = workbook.Sheets[communicationSheetName];
+      // Use header: 1 to get array of arrays (raw rows)
+      const commRows: any[][] = XLSX.utils.sheet_to_json(commSheet, { header: 1 });
+
+      if (commRows && commRows.length > 0) {
+        // Import the parsing utility
+        const { parseCommunicationTemplates } = await import('./utils/email-template.util');
+
+        communicationTemplates = parseCommunicationTemplates(commRows);
+      }
+    }
+
     const createSurveyDto: CreateSurveyDto = {
       name: surveyName,
       description: surveyDescription,
       category: 'uploaded',
       status: SurveyStatus.DRAFT,
+      communicationTemplates: communicationTemplates || undefined,
       pages: Array.from(pagesMap.values()).map((page, idx) => ({
         title: page.title,
         description: page.description,

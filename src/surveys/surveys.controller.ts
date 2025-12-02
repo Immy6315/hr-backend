@@ -37,7 +37,7 @@ export class SurveysController {
     private readonly userSurveysService: UserSurveysService,
     private readonly participantsService: SurveyParticipantsService,
     private readonly emailService: EmailService,
-  ) {}
+  ) { }
 
   @Post()
   @Post(':surveyId/reminders/send')
@@ -224,7 +224,7 @@ export class SurveysController {
       role: req.user.role,
       organizationId: req.user.organizationId || req.user.user?.organizationId?.toString(),
     });
-    
+
     // Format response to match API structure
     return {
       statusCode: 200,
@@ -247,6 +247,8 @@ export class SurveysController {
         reminderSettings: survey.reminderSettings || null,
         projectDetails: survey.projectDetails || null,
         ratingScale: survey.ratingScale || [],
+        startDate: survey.startDate,
+        endDate: survey.endDate,
         createdAt: survey.createdAt,
         updatedAt: survey.updatedAt,
         pages: survey.pages || [],
@@ -297,7 +299,7 @@ export class SurveysController {
       role: req.user.role,
       organizationId: req.user.organizationId || req.user.user?.organizationId?.toString(),
     });
-    
+
     // Get all UserSurveys for this survey (only if user owns the survey)
     const userSurveys = await this.userSurveysService.findAll(undefined, id);
     return {

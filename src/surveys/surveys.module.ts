@@ -29,8 +29,10 @@ import { SurveyParticipant, SurveyParticipantSchema } from './schemas/survey-par
 import { SurveyParticipantsService } from './survey-participants.service';
 import { SurveyParticipantsController } from './survey-participants.controller';
 import { SurveyTemplateDraft, SurveyTemplateDraftSchema } from './schemas/survey-template-draft.schema';
+import { User, UserSchema } from '../users/schemas/user.schema';
 import { EmailModule } from '../email/email.module';
 import { SurveyTemplateDraftsService } from './survey-template-drafts.service';
+import { ReminderService } from './reminder.service';
 
 @Module({
   imports: [
@@ -44,6 +46,7 @@ import { SurveyTemplateDraftsService } from './survey-template-drafts.service';
       { name: SurveyAuditLog.name, schema: SurveyAuditLogSchema },
       { name: SurveyParticipant.name, schema: SurveyParticipantSchema },
       { name: SurveyTemplateDraft.name, schema: SurveyTemplateDraftSchema },
+      { name: User.name, schema: UserSchema },
     ]),
   ],
   controllers: [
@@ -71,6 +74,7 @@ import { SurveyTemplateDraftsService } from './survey-template-drafts.service';
     SurveyAuditLogService,
     SurveyParticipantsService,
     SurveyTemplateDraftsService,
+    ReminderService,
   ],
   exports: [
     SurveysService,
@@ -84,5 +88,5 @@ import { SurveyTemplateDraftsService } from './survey-template-drafts.service';
     SurveyTemplateDraftsService,
   ],
 })
-export class SurveysModule {}
+export class SurveysModule { }
 

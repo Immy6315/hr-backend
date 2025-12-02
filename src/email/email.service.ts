@@ -10,7 +10,7 @@ export class EmailService {
   constructor(
     private readonly configService: ConfigService,
     private readonly rabbitMQService: RabbitMQService,
-  ) {}
+  ) { }
 
   async sendVerificationEmail(email: string, otp: string, username: string = ''): Promise<boolean> {
     try {
@@ -70,7 +70,7 @@ If you didn't create an account with ${this.appName}, you can safely ignore this
       };
 
       const published = await this.rabbitMQService.publishEmail(emailMessage);
-      
+
       if (published) {
         this.logger.log(`✅ Verification email queued for ${email}`);
       } else {
@@ -204,7 +204,7 @@ If you didn't expect this invitation, contact your Impact Plus administrator or 
       };
 
       const published = await this.rabbitMQService.publishEmail(emailMessage);
-      
+
       if (published) {
         this.logger.log(`✅ Invitation email queued for ${email}`);
       } else {
@@ -234,8 +234,7 @@ If you didn't expect this invitation, contact your Impact Plus administrator or 
           ...context,
           appName: this.appName,
         },
-        html: compiledBody,
-        text: compiledBody.replace(/<[^>]+>/g, ''),
+        text: compiledBody,
         priority: 'normal' as const,
       };
 
@@ -345,5 +344,230 @@ If you didn’t request this change, you can ignore this email.
     }
   }
 
-}
+  /**
+   * Send survey participant invitation email
+   * @param participant The participant object with participant and respondent details
+   * @param plainPassword The plain text password for login
+   * @param survey Survey details
+   * @param template Email template from survey's communicationTemplates
+   */
+  async sendSurveyParticipantInvite(
+    participant: any,
+    plainPassword: string,
+    survey: any,
+    template?: { subject: string; text: string; html: string },
+  ): Promise<boolean> {
+    try {
+      const frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'http://localhost:8080';
+      const loginUrl = `${frontendUrl}/survey-collector/login`;
 
+      const variables = {
+        assesseename: participant.participantName || '',
+        respondentname: participant.respondentName || '',
+        assessorname: participant.respondentName || '',
+        username: participant.username || participant.respondentEmail,
+        password: plainPassword,
+        loginurl: loginUrl,
+        duedate: survey.endDate ? new Date(survey.endDate).toLocaleDateString() : 'TBD',
+        supportemail: 'support@eztuitions.com',
+      };
+
+      let subject = template?.subject || '360° Feedback : Self Assessment Invite';
+      let textBody = template?.text || 'Default invitation text';
+      let htmlBody = template?.html || template?.text || 'Default invitation HTML';
+
+      // Replace variables
+      const { replaceTemplateVariables } = await import('../surveys/utils/email-template.util');
+      subject = replaceTemplateVariables(subject, variables);
+      textBody = replaceTemplateVariables(textBody, variables);
+      htmlBody = replaceTemplateVariables(htmlBody, variables);
+
+      // Append login credentials section to HTML
+      htmlBody += `
+        <div style="background: #f8fafc; border-radius: 12px; padding: 20px; margin: 24px 0; border: 1px solid #e2e8f0;">
+          <p style="margin: 0 0 12px 0; font-weight: 600; color: #334155;">Here are your login details:</p>
+          <p style="margin: 4px 0;"><strong>Login URL:</strong> <a href="${loginUrl}" style="color: #3b5bdb;">${loginUrl}</a></p>
+          <p style="margin: 4px 0;"><strong>Username:</strong> ${variables.username}</p>
+          <p style="margin: 4px 0;"><strong>Password:</strong> <code style="background: #dbeafe; padding: 4px 8px; border-radius: 4px; font-family: monospace;">${plainPassword}</code></p>
+        </div>
+      `;
+
+      const emailMessage = {
+        to: participant.respondentEmail,
+        subject,
+        text: textBody + `\n\nLogin URL: ${loginUrl}\nUsername: ${variables.username}\nPassword: ${plainPassword}`,
+        priority: 'high' as const,
+      };
+
+      const published = await this.rabbitMQService.publishEmail(emailMessage);
+      if (published) {
+        this.logger.log(`✅ Survey participant invite queued for ${participant.respondentEmail}`);
+      }
+      return published;
+    } catch (error) {
+      this.logger.error(`❌ Error sending survey participant invite:`, error);
+      return false;
+    }
+  }
+
+  /**
+   * Send survey respondent invitation email
+   * Similar to participant invite but for respondents providing feedback
+   */
+  async sendSurveyRespondentInvite(
+    participant: any,
+    plainPassword: string,
+    survey: any,
+    participantsList: string[],
+    template?: { subject: string; text: string; html: string },
+  ): Promise<boolean> {
+    try {
+      const frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'http://localhost:8080';
+      const loginUrl = `${frontendUrl}/survey-collector/login`;
+
+      const variables = {
+        assessorname: participant.respondentName || '',
+        listofassessee: participantsList.join(', '),
+        username: participant.username || participant.respondentEmail,
+        password: plainPassword,
+        loginurl: loginUrl,
+        duedate: survey.endDate ? new Date(survey.endDate).toLocaleDateString() : 'TBD',
+        supportemail: 'support@eztuitions.com',
+      };
+
+      let subject = template?.subject || '360° Feedback Invite';
+      let textBody = template?.text || 'Default respondent invitation text';
+      let htmlBody = template?.html || template?.text || 'Default respondent invitation HTML';
+
+      const { replaceTemplateVariables } = await import('../surveys/utils/email-template.util');
+      subject = replaceTemplateVariables(subject, variables);
+      textBody = replaceTemplateVariables(textBody, variables);
+      htmlBody = replaceTemplateVariables(htmlBody, variables);
+
+      htmlBody += `
+        <div style="background: #f8fafc; border-radius: 12px; padding: 20px; margin: 24px 0; border: 1px solid #e2e8f0;">
+          <p style="margin: 0 0 12px 0; font-weight: 600; color: #334155;">Here are your login details:</p>
+          <p style="margin: 4px 0;"><strong>Login URL:</strong> <a href="${loginUrl}" style="color: #3b5bdb;">${loginUrl}</a></p>
+          <p style="margin: 4px 0;"><strong>Username:</strong> ${variables.username}</p>
+          <p style="margin: 4px 0;"><strong>Password:</strong> <code style="background: #dbeafe; padding: 4px 8px; border-radius: 4px; font-family: monospace;">${plainPassword}</code></p>
+        </div>
+      `;
+
+      const emailMessage = {
+        to: participant.respondentEmail,
+        subject,
+        text: textBody + `\n\nLogin URL: ${loginUrl}\nUsername: ${variables.username}\nPassword: ${plainPassword}`,
+        priority: 'high' as const,
+      };
+
+      const published = await this.rabbitMQService.publishEmail(emailMessage);
+      if (published) {
+        this.logger.log(`✅ Survey respondent invite queued for ${participant.respondentEmail}`);
+      }
+      return published;
+    } catch (error) {
+      this.logger.error(`❌ Error sending survey respondent invite:`, error);
+      return false;
+    }
+  }
+
+  /**
+   * Send survey reminder email to respondent
+   */
+  async sendSurveyReminder(
+    participant: any,
+    survey: any,
+    template?: { subject: string; text: string; html: string },
+  ): Promise<boolean> {
+    try {
+      const frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'http://localhost:8080';
+      const loginUrl = `${frontendUrl}/survey-collector/login`;
+
+      const variables = {
+        assessorname: participant.respondentName || '',
+        listofassessee: participant.participantName || '',
+        username: participant.username || participant.respondentEmail,
+        loginurl: loginUrl,
+        duedate: survey.endDate ? new Date(survey.endDate).toLocaleDateString() : 'TBD',
+        supportemail: 'support@eztuitions.com',
+      };
+
+      let subject = template?.subject || '360° Feedback Reminder';
+      let textBody = template?.text || 'This is a reminder to complete your feedback.';
+      let htmlBody = template?.html || template?.text || 'Default reminder HTML';
+
+      const { replaceTemplateVariables } = await import('../surveys/utils/email-template.util');
+      subject = replaceTemplateVariables(subject, variables);
+      textBody = replaceTemplateVariables(textBody, variables);
+      htmlBody = replaceTemplateVariables(htmlBody, variables);
+
+      htmlBody += `
+        <div style="background: #fff7ed; border-radius: 12px; padding: 20px; margin: 24px 0; border: 1px solid #fed7aa;">
+          <p style="margin: 0 0 12px 0; font-weight: 600; color: #9a3412;">⏰ Reminder: Please complete your feedback</p>
+          <p style="margin: 4px 0;"><strong>Login URL:</strong> <a href="${loginUrl}" style="color: #3b5bdb;">${loginUrl}</a></p>
+          <p style="margin: 4px 0;"><strong>Username:</strong> ${variables.username}</p>
+        </div>
+      `;
+
+      const emailMessage = {
+        to: participant.respondentEmail,
+        subject,
+        text: textBody + `\n\nLogin URL: ${loginUrl}\nUsername: ${variables.username}`,
+        priority: 'normal' as const,
+      };
+
+      const published = await this.rabbitMQService.publishEmail(emailMessage);
+      if (published) {
+        this.logger.log(`✅ Survey reminder queued for ${participant.respondentEmail}`);
+      }
+      return published;
+    } catch (error) {
+      this.logger.error(`❌ Error sending survey reminder:`, error);
+      return false;
+    }
+  }
+
+  /**
+   * Send survey cancellation email to respondent
+   */
+  async sendSurveyCancellation(
+    participant: any,
+    survey: any,
+    template?: { subject: string; text: string; html: string },
+  ): Promise<boolean> {
+    try {
+      const variables = {
+        assessorname: participant.respondentName || '',
+        assesseename: participant.participantName || '', // Note: template uses assesseename for cancellation
+        listofassessee: participant.participantName || '',
+        username: participant.username || participant.respondentEmail,
+        supportemail: 'support@eztuitions.com',
+      };
+
+      let subject = template?.subject || '360° Feedback Invite Cancellation';
+      let textBody = template?.text || 'This is to inform you that the feedback invite has been cancelled.';
+      let htmlBody = template?.html || template?.text || 'Default cancellation HTML';
+
+      const { replaceTemplateVariables } = await import('../surveys/utils/email-template.util');
+      subject = replaceTemplateVariables(subject, variables);
+      textBody = replaceTemplateVariables(textBody, variables);
+      htmlBody = replaceTemplateVariables(htmlBody, variables);
+
+      const emailMessage = {
+        to: participant.respondentEmail,
+        subject,
+        text: textBody,
+        priority: 'normal' as const,
+      };
+
+      const published = await this.rabbitMQService.publishEmail(emailMessage);
+      if (published) {
+        this.logger.log(`✅ Survey cancellation queued for ${participant.respondentEmail}`);
+      }
+      return published;
+    } catch (error) {
+      this.logger.error(`❌ Error sending survey cancellation:`, error);
+      return false;
+    }
+  }
+}

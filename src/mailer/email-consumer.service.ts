@@ -14,7 +14,7 @@ export class EmailConsumerService implements OnModuleInit {
     private readonly rabbitMQService: RabbitMQService,
     private readonly mailerService: MailerService,
     private readonly configService: ConfigService,
-  ) {}
+  ) { }
 
   async onModuleInit() {
     // Start consuming emails after a short delay to ensure RabbitMQ is connected
@@ -30,8 +30,8 @@ export class EmailConsumerService implements OnModuleInit {
       const rabbitMQConfig = getRabbitMQConfig(this.configService);
       const channel = this.rabbitMQService.getChannel();
 
-      if (!channel || !this.rabbitMQService.isChannelReady()) {
-        this.logger.warn('⏳ RabbitMQ channel not available yet. Will retry...');
+      if (!channel || !this.rabbitMQService.isQueueReady()) {
+        this.logger.warn('⏳ RabbitMQ channel/queues not available yet. Will retry...');
         setTimeout(() => this.startConsuming(), 5000);
         return;
       }
@@ -70,7 +70,7 @@ export class EmailConsumerService implements OnModuleInit {
             }
           } catch (error: any) {
             this.logger.error(`❌ Error processing email: ${error.message}`);
-            
+
             // Check retry count
             const retryCount = (message.properties.headers?.['x-retry-count'] as number) || 0;
             const maxRetries = 3;
@@ -81,7 +81,7 @@ export class EmailConsumerService implements OnModuleInit {
                 ...message.properties.headers,
                 'x-retry-count': retryCount + 1,
               };
-              
+
               channel.nack(message, false, true);
               this.logger.warn(`⚠️ Requeuing email (retry ${retryCount + 1}/${maxRetries})`);
             } else {
