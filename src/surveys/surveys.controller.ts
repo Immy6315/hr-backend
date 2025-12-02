@@ -39,7 +39,6 @@ export class SurveysController {
     private readonly emailService: EmailService,
   ) { }
 
-  @Post()
   @Post(':surveyId/reminders/send')
   @Roles(UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN, UserRole.ORG_SUB_ADMIN)
   @ApiOperation({ summary: 'Send reminder emails to pending participants' })
@@ -88,6 +87,7 @@ export class SurveysController {
       },
     };
   }
+  @Post()
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @UsePipes(new ValidationPipe())
