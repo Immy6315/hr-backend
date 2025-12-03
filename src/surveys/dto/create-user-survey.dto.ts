@@ -11,5 +11,10 @@ export class CreateUserSurveyDto {
   @IsOptional()
   @IsString()
   ipAddress?: string;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsMongoId()
+  surveyParticipantId?: string;
 }
 

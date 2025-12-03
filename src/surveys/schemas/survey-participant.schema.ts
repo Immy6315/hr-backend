@@ -6,6 +6,9 @@ export class SurveyParticipant extends Document {
   @Prop({ type: Types.ObjectId, ref: 'Survey', required: true })
   surveyId: Types.ObjectId;
 
+  @Prop({ type: Types.ObjectId, ref: 'UserSurvey', required: false })
+  userSurveyId?: Types.ObjectId; // Link to the actual response
+
   @Prop({ required: true })
   participantName: string;
 

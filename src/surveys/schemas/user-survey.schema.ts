@@ -16,6 +16,9 @@ export class UserSurvey extends Document {
   @Prop({ type: Types.ObjectId, ref: 'Survey', required: true, index: true })
   surveyId: Types.ObjectId;
 
+  @Prop({ type: Types.ObjectId, ref: 'SurveyParticipant', required: false, index: true })
+  surveyParticipantId?: Types.ObjectId; // Link to the specific participant assignment (Subject)
+
   @Prop({ type: String, enum: UserSurveyStatus, default: UserSurveyStatus.STARTED })
   status: UserSurveyStatus;
 

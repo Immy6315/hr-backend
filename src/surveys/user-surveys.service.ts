@@ -3,6 +3,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { UserSurvey, UserSurveyStatus } from './schemas/user-survey.schema';
 import { Survey } from './schemas/survey.schema';
+import { SurveyParticipant } from './schemas/survey-participant.schema';
 import { CreateUserSurveyDto } from './dto/create-user-survey.dto';
 import { SurveysService } from './surveys.service';
 import * as crypto from 'crypto';
@@ -12,6 +13,7 @@ export class UserSurveysService {
   constructor(
     @InjectModel(UserSurvey.name) private userSurveyModel: Model<UserSurvey>,
     @InjectModel(Survey.name) private surveyModel: Model<Survey>,
+    @InjectModel(SurveyParticipant.name) private participantModel: Model<SurveyParticipant>,
     private surveysService: SurveysService,
   ) { }
 
@@ -31,8 +33,14 @@ export class UserSurveysService {
       isDeleted: false,
     };
 
-    if (userId && userId.trim() !== '') {
+    if (createUserSurveyDto.surveyParticipantId) {
+      // If participant ID provided, check for existing response for this specific participant assignment
+      query.surveyParticipantId = new Types.ObjectId(createUserSurveyDto.surveyParticipantId);
+    } else if (userId && userId.trim() !== '') {
       query.userId = userId;
+      // Ensure we don't pick up a response that is linked to a specific participant if we are looking for a generic user response
+      // (Though in 360 logic, usually all responses are linked to a participant)
+      query.surveyParticipantId = { $exists: false };
     } else {
       query.userId = null; // For IP-based surveys
     }
@@ -74,9 +82,21 @@ export class UserSurveysService {
       userSurveyData.userId = userId;
     }
 
+    if (createUserSurveyDto.surveyParticipantId) {
+      userSurveyData.surveyParticipantId = new Types.ObjectId(createUserSurveyDto.surveyParticipantId);
+    }
+
     const userSurvey = new this.userSurveyModel(userSurveyData);
 
     const saved = await userSurvey.save();
+
+    // Link back to SurveyParticipant if applicable
+    if (createUserSurveyDto.surveyParticipantId) {
+      await this.participantModel.updateOne(
+        { _id: createUserSurveyDto.surveyParticipantId },
+        { $set: { userSurveyId: saved._id } }
+      );
+    }
 
     // Increment survey response count
     await this.surveysService.incrementResponseCount(createUserSurveyDto.surveyId);
@@ -130,6 +150,7 @@ export class UserSurveysService {
         surveyId: new Types.ObjectId(surveyId),
         isDeleted: false,
       })
+      .populate('surveyParticipantId')
       .sort({ createdAt: -1 })
       .exec();
   }

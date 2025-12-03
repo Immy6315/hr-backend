@@ -67,69 +67,69 @@ export class Survey extends Document {
   @Prop({ type: Number, default: 1 })
   ipResponseLimit?: number; // Number of responses allowed per IP (default: 1)
 
-@Prop({
-  type: [
-    {
-      type: { type: String },
-      subject: String,
-      body: String,
-      schedule: String,
-    },
-  ],
-  default: [],
-})
-reminderTemplates?: Array<{
-  type: string;
-  subject: string;
-  body: string;
-  schedule?: string;
-}>;
-
-@Prop({ type: Object })
-communicationTemplates?: {
-  participantInvite?: {
+  @Prop({
+    type: [
+      {
+        type: { type: String },
+        subject: String,
+        body: String,
+        schedule: String,
+      },
+    ],
+    default: [],
+  })
+  reminderTemplates?: Array<{
+    type: string;
     subject: string;
-    html: string;
-    text: string;
-  };
-  respondentInvite?: {
-    subject: string;
-    html: string;
-    text: string;
-  };
-  respondentReminder?: {
-    subject: string;
-    html: string;
-    text: string;
-  };
-  respondentCancellation?: {
-    subject: string;
-    html: string;
-    text: string;
-  };
-};
+    body: string;
+    schedule?: string;
+  }>;
 
-@Prop({ type: Object })
-reminderSettings?: {
-  waitBeforeReminderHours?: number;
-  reminderFrequency?: string;
-  completionStatusDashboard?: Record<string, any>;
-};
+  @Prop({ type: Object })
+  communicationTemplates?: {
+    participantInvite?: {
+      subject: string;
+      html: string;
+      text: string;
+    };
+    respondentInvite?: {
+      subject: string;
+      html: string;
+      text: string;
+    };
+    respondentReminder?: {
+      subject: string;
+      html: string;
+      text: string;
+    };
+    respondentCancellation?: {
+      subject: string;
+      html: string;
+      text: string;
+    };
+  };
 
-@Prop({ type: Object })
-projectDetails?: Record<string, any>;
+  @Prop({ type: Object })
+  reminderSettings?: {
+    waitBeforeReminderHours?: number;
+    reminderFrequency?: string;
+    completionStatusDashboard?: Record<string, any>;
+  };
 
-@Prop({
-  type: [
-    {
-      weight: Number,
-      label: String,
-      description: String,
-    },
-  ],
-  default: [],
-})
-ratingScale?: Array<{ weight: number; label: string; description?: string }>;
+  @Prop({ type: Object })
+  projectDetails?: Record<string, any>;
+
+  @Prop({
+    type: [
+      {
+        weight: Number,
+        label: String,
+        description: String,
+      },
+    ],
+    default: [],
+  })
+  ratingScale?: Array<{ weight: number; label: string; description?: string }>;
 
   @Prop({ type: Date })
   createdAt?: Date;

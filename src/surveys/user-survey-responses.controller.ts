@@ -106,6 +106,58 @@ export class UserSurveyResponsesController {
     return this.responsesService.getQuestionAnalytics(surveyId, questionId);
   }
 
+  @Get('export/individual/:userSurveyId')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Export all responses for a specific user survey' })
+  async exportIndividualResponses(
+    @Param('userSurveyId') userSurveyId: string,
+    @Res() res: Response,
+  ) {
+    const filePath = await this.responsesService.exportIndividualResponses(userSurveyId);
+
+    res.download(filePath, `individual-responses-${userSurveyId}.xlsx`, (err) => {
+      if (err) {
+        console.error('Download error:', err);
+      }
+      // Delete file after download (or error)
+      const fs = require('fs');
+      try {
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+        }
+      } catch (cleanupErr) {
+        console.error('Error deleting temp file:', cleanupErr);
+      }
+    });
+  }
+
+  @Get('export/individual/:userSurveyId/pdf')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Export all responses for a specific user survey as PDF' })
+  async exportIndividualResponsesPdf(
+    @Param('userSurveyId') userSurveyId: string,
+    @Res() res: Response,
+  ) {
+    const filePath = await this.responsesService.exportIndividualResponsesPdf(userSurveyId);
+
+    res.download(filePath, `individual-responses-${userSurveyId}.pdf`, (err) => {
+      if (err) {
+        console.error('Download error:', err);
+      }
+      // Delete file after download (or error)
+      const fs = require('fs');
+      try {
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+        }
+      } catch (cleanupErr) {
+        console.error('Error deleting temp file:', cleanupErr);
+      }
+    });
+  }
+
   @Get('export/:surveyId/:questionId')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
@@ -122,6 +174,84 @@ export class UserSurveyResponsesController {
         console.error('Download error:', err);
       }
       // Delete file after download (or error)
+      const fs = require('fs');
+      try {
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+        }
+      } catch (cleanupErr) {
+        console.error('Error deleting temp file:', cleanupErr);
+      }
+    });
+  }
+
+  @Get('export/participant/:surveyId/:participantEmail')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Export consolidated responses for a participant' })
+  async exportParticipantResponses(
+    @Param('surveyId') surveyId: string,
+    @Param('participantEmail') participantEmail: string,
+    @Res() res: Response,
+  ) {
+    const filePath = await this.responsesService.exportParticipantResponses(surveyId, participantEmail);
+
+    res.download(filePath, `participant-${participantEmail}.xlsx`, (err) => {
+      if (err) {
+        console.error('Download error:', err);
+      }
+      const fs = require('fs');
+      try {
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+        }
+      } catch (cleanupErr) {
+        console.error('Error deleting temp file:', cleanupErr);
+      }
+    });
+  }
+
+  @Get('export/participant/:surveyId/:participantEmail/pdf')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Export consolidated responses for a participant as PDF' })
+  async exportParticipantResponsesPdf(
+    @Param('surveyId') surveyId: string,
+    @Param('participantEmail') participantEmail: string,
+    @Res() res: Response,
+  ) {
+    const filePath = await this.responsesService.exportParticipantResponsesPdf(surveyId, participantEmail);
+
+    res.download(filePath, `participant-${participantEmail}.pdf`, (err) => {
+      if (err) {
+        console.error('Download error:', err);
+      }
+      const fs = require('fs');
+      try {
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+        }
+      } catch (cleanupErr) {
+        console.error('Error deleting temp file:', cleanupErr);
+      }
+    });
+  }
+
+  @Get('export/question/:surveyId/:questionId/pdf')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Export responses for a specific question as PDF' })
+  async exportQuestionResponsesPdf(
+    @Param('surveyId') surveyId: string,
+    @Param('questionId') questionId: string,
+    @Res() res: Response,
+  ) {
+    const filePath = await this.responsesService.exportQuestionResponsesPdf(surveyId, questionId);
+
+    res.download(filePath, `question-${questionId}.pdf`, (err) => {
+      if (err) {
+        console.error('Download error:', err);
+      }
       const fs = require('fs');
       try {
         if (fs.existsSync(filePath)) {
