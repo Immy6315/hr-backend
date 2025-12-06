@@ -115,7 +115,7 @@ export class SurveyParticipantsService {
   async findAll(
     surveyId: string,
     ctx: AccessContext,
-    options?: { page?: number; limit?: number; search?: string; status?: string },
+    options?: { page?: number; limit?: number; search?: string; status?: string; includeRejected?: boolean },
   ) {
     await this.ensureSurveyAccess(surveyId, ctx);
 
@@ -126,6 +126,12 @@ export class SurveyParticipantsService {
       surveyId: new Types.ObjectId(surveyId),
       isDeleted: false,
     };
+
+    // Exclude rejected participants by default (Participants tab)
+    // Include them only if explicitly requested (Nominations page)
+    if (!options?.includeRejected) {
+      filter.verificationStatus = { $ne: 'rejected' };
+    }
 
     if (options?.status) {
       filter.completionStatus = new RegExp(`^${options.status}$`, 'i');
@@ -145,6 +151,11 @@ export class SurveyParticipantsService {
       surveyId: new Types.ObjectId(surveyId),
       isDeleted: false,
     };
+
+    // Same logic for status breakdown
+    if (!options?.includeRejected) {
+      baseMatch.verificationStatus = { $ne: 'rejected' };
+    }
 
     const [totalFiltered, participants, statusBreakdown] = await Promise.all([
       this.participantModel.countDocuments(filter),
@@ -199,6 +210,129 @@ export class SurveyParticipantsService {
     };
   }
 
+  async verify(surveyId: string, participantId: string, ctx: AccessContext) {
+    await this.ensureSurveyAccess(surveyId, ctx);
+    const participant = await this.participantModel.findOne({
+      _id: participantId,
+      surveyId: new Types.ObjectId(surveyId),
+      isDeleted: false,
+    });
+
+    if (!participant) {
+      throw new NotFoundException('Participant not found');
+    }
+
+    participant.verificationStatus = 'verified';
+    return participant.save();
+  }
+
+  async reject(surveyId: string, participantId: string, ctx: AccessContext) {
+    await this.ensureSurveyAccess(surveyId, ctx);
+    const participant = await this.participantModel.findOne({
+      _id: participantId,
+      surveyId: new Types.ObjectId(surveyId),
+      isDeleted: false,
+    });
+
+    if (!participant) {
+      throw new NotFoundException('Participant not found');
+    }
+
+    participant.verificationStatus = 'rejected';
+    await participant.save();
+
+    // Reset the nominator's nomination status to allow re-submission
+    if (participant.nominatedBy) {
+      await this.participantModel.updateMany(
+        {
+          surveyId: new Types.ObjectId(surveyId),
+          participantEmail: participant.nominatedBy,
+          isDeleted: false,
+        },
+        {
+          $set: { nominationStatus: 'in_progress' },
+        },
+      );
+    }
+
+    return participant;
+  }
+
+  async inviteParticipant(surveyId: string, participantId: string, ctx: AccessContext) {
+    await this.ensureSurveyAccess(surveyId, ctx);
+    const participant = await this.participantModel.findOne({
+      _id: participantId,
+      surveyId: new Types.ObjectId(surveyId),
+      isDeleted: false,
+    });
+
+    if (!participant) {
+      throw new NotFoundException('Participant not found');
+    }
+
+    if (!participant.respondentEmail) {
+      throw new BadRequestException('Respondent email is required to send an invite');
+    }
+
+    // 1. Get Survey for details and templates
+    const survey = await this.surveysService.findOne(surveyId, {
+      userId: ctx.userId,
+      role: ctx.role,
+      organizationId: ctx.organizationId,
+    });
+
+    // 2. Generate new credentials
+    const { generateCredentials } = await import('./utils/credentials.util');
+    const credentials = await generateCredentials(participant.respondentEmail);
+
+    // 3. Update password for this participant and ALL other participants with same email
+    // This ensures single sign-on experience across surveys
+    await this.participantModel.updateMany(
+      {
+        respondentEmail: participant.respondentEmail,
+        isDeleted: false,
+      },
+      {
+        $set: {
+          password: credentials.hashedPassword,
+          username: credentials.username,
+        },
+      },
+    );
+
+    // 4. Send Email
+    // Use 'participantInvite' template if available, otherwise default
+    // We want to emphasize that this is for BOTH survey and nominations
+    const template = survey.communicationTemplates?.participantInvite || {
+      subject: 'Invitation to 360° Feedback Survey & Nomination',
+      text: 'You have been invited to participate in a 360° Feedback Survey. Please log in to nominate your respondents and complete your self-assessment.',
+      html: `
+        <p>You have been invited to participate in a 360° Feedback Survey.</p>
+        <p><strong>Action Required:</strong></p>
+        <ul>
+          <li>Log in to the portal.</li>
+          <li><strong>Nominate</strong> your peers, managers, and direct reports (if applicable).</li>
+          <li>Complete your <strong>Self-Assessment</strong>.</li>
+        </ul>
+        <p>Please ensure you complete these steps by the due date.</p>
+      `
+    };
+
+    // We use sendSurveyParticipantInvite which sends login credentials
+    const emailSent = await this.emailService.sendSurveyParticipantInvite(
+      participant,
+      credentials.password,
+      survey,
+      template
+    );
+
+    if (!emailSent) {
+      throw new BadRequestException('Failed to send invitation email');
+    }
+
+    return { message: 'Invitation sent successfully' };
+  }
+
   async update(surveyId: string, participantId: string, dto: UpdateSurveyParticipantDto, ctx: AccessContext) {
     await this.ensureSurveyAccess(surveyId, ctx);
 
@@ -222,6 +356,15 @@ export class SurveyParticipantsService {
     }
     if (dto.completionDate !== undefined) {
       participant.completionDate = this.parseCompletionDate(dto.completionDate);
+    }
+    if (dto.nominationStatus !== undefined) {
+      participant.nominationStatus = dto.nominationStatus;
+    }
+    if (dto.addedBy) {
+      participant.addedBy = dto.addedBy;
+    }
+    if (dto.verificationStatus !== undefined) {
+      participant.verificationStatus = dto.verificationStatus;
     }
 
     return participant.save();

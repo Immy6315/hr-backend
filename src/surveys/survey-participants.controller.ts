@@ -48,6 +48,7 @@ export class SurveyParticipantsController {
     @Query('limit') limit = '10',
     @Query('search') search: string = '',
     @Query('status') status: string = 'all',
+    @Query('includeRejected') includeRejected: string = 'false',
     @Req() req: any,
   ) {
     const normalizedSearch = search?.trim() || undefined;
@@ -58,6 +59,7 @@ export class SurveyParticipantsController {
       limit: Number(limit) || 10,
       search: normalizedSearch,
       status: normalizedStatus,
+      includeRejected: includeRejected === 'true',
     });
     return {
       message: 'Participants fetched successfully',
@@ -173,6 +175,62 @@ export class SurveyParticipantsController {
     return {
       message: 'Reminder statistics fetched',
       data: stats,
+    };
+  }
+
+  @Patch(':participantId/verify')
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN, UserRole.ORG_SUB_ADMIN)
+  @ApiOperation({ summary: 'Verify a nominee' })
+  async verify(
+    @Param('surveyId') surveyId: string,
+    @Param('participantId') participantId: string,
+    @Req() req: any,
+  ) {
+    const participant = await this.participantsService.verify(
+      surveyId,
+      participantId,
+      this.buildAccessContext(req),
+    );
+    return {
+      message: 'Nominee verified successfully',
+      data: participant,
+    };
+  }
+
+  @Patch(':participantId/reject')
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN, UserRole.ORG_SUB_ADMIN)
+  @ApiOperation({ summary: 'Reject a nominee' })
+  async reject(
+    @Param('surveyId') surveyId: string,
+    @Param('participantId') participantId: string,
+    @Req() req: any,
+  ) {
+    const participant = await this.participantsService.reject(
+      surveyId,
+      participantId,
+      this.buildAccessContext(req),
+    );
+    return {
+      message: 'Nominee rejected successfully',
+      data: participant,
+    };
+  }
+
+  @Post(':participantId/invite')
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN, UserRole.ORG_SUB_ADMIN)
+  @ApiOperation({ summary: 'Send invitation email to participant' })
+  async invite(
+    @Param('surveyId') surveyId: string,
+    @Param('participantId') participantId: string,
+    @Req() req: any,
+  ) {
+    const result = await this.participantsService.inviteParticipant(
+      surveyId,
+      participantId,
+      this.buildAccessContext(req),
+    );
+    return {
+      message: result.message,
     };
   }
 }

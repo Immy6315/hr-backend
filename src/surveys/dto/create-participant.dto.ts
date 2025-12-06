@@ -1,4 +1,4 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
 import { IsEmail, IsNotEmpty, IsOptional, IsString } from 'class-validator';
 
 export class CreateSurveyParticipantDto {
@@ -36,8 +36,22 @@ export class CreateSurveyParticipantDto {
   @IsOptional()
   @IsString()
   completionDate?: string;
+
+  @ApiPropertyOptional({ description: 'Who added the participant', enum: ['admin', 'participant'] })
+  @IsOptional()
+  @IsString()
+  addedBy?: 'admin' | 'participant';
+
+  @ApiPropertyOptional({ description: 'Verification status', enum: ['pending', 'verified', 'rejected'] })
+  @IsOptional()
+  @IsString()
+  verificationStatus?: 'pending' | 'verified' | 'rejected';
 }
 
-export class UpdateSurveyParticipantDto extends CreateSurveyParticipantDto {}
-
+export class UpdateSurveyParticipantDto extends PartialType(CreateSurveyParticipantDto) {
+  @ApiPropertyOptional({ description: 'Nomination status', enum: ['not_started', 'in_progress', 'submitted'] })
+  @IsOptional()
+  @IsString()
+  nominationStatus?: 'not_started' | 'in_progress' | 'submitted';
+}
 

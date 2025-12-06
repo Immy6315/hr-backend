@@ -34,6 +34,8 @@ import { EmailModule } from '../email/email.module';
 import { SurveyTemplateDraftsService } from './survey-template-drafts.service';
 import { ReminderService } from './reminder.service';
 
+import { NominationsController } from './nominations.controller';
+
 @Module({
   imports: [
     EmailModule,
@@ -63,6 +65,7 @@ import { ReminderService } from './reminder.service';
     UserSurveyResponsesController,
     SurveyAuditLogController,
     SurveyParticipantsController,
+    NominationsController,
   ],
   providers: [
     SurveysService,

@@ -570,4 +570,64 @@ If you didn’t request this change, you can ignore this email.
       return false;
     }
   }
+  /**
+   * Send nomination invitation email
+   */
+  async sendNominationInvite(
+    participant: any,
+    survey: any,
+    template?: { subject: string; text: string; html: string },
+  ): Promise<boolean> {
+    try {
+      const frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'http://localhost:8080';
+      // Direct link to the nomination login page
+      const nominationUrl = `${frontendUrl}/nominations/${survey._id}/login`;
+
+      const variables = {
+        participantname: participant.participantName || '',
+        participantemail: participant.participantEmail || '',
+        surveyname: survey.name || '360° Feedback Survey',
+        nominationurl: nominationUrl,
+        duedate: survey.endDate ? new Date(survey.endDate).toLocaleDateString() : 'TBD',
+        supportemail: 'support@eztuitions.com',
+      };
+
+      let subject = template?.subject || 'Action Required: Nominate Respondents for 360° Feedback';
+      let textBody = template?.text || 'Please log in to nominate your respondents.';
+      let htmlBody = template?.html || template?.text || 'Default nomination HTML';
+
+      const { replaceTemplateVariables } = await import('../surveys/utils/email-template.util');
+      subject = replaceTemplateVariables(subject, variables);
+      textBody = replaceTemplateVariables(textBody, variables);
+      htmlBody = replaceTemplateVariables(htmlBody, variables);
+
+      // Append login button/link to HTML
+      htmlBody += `
+        <div style="background: #f8fafc; border-radius: 12px; padding: 20px; margin: 24px 0; border: 1px solid #e2e8f0; text-align: center;">
+          <p style="margin: 0 0 16px 0; font-weight: 600; color: #334155;">Please click the button below to start nominating:</p>
+          <a href="${nominationUrl}" style="background: #3b5bdb; color: #fff; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: 600; display: inline-block;">
+            Go to Nomination Portal
+          </a>
+          <p style="margin: 16px 0 4px 0; font-size: 12px; color: #64748b;">Or copy this link:</p>
+          <p style="margin: 0; font-size: 12px; color: #3b5bdb; word-break: break-all;">${nominationUrl}</p>
+        </div>
+      `;
+
+      const emailMessage = {
+        to: participant.participantEmail, // Send to participant email, not respondent email
+        subject,
+        text: textBody + `\n\nNomination Portal: ${nominationUrl}`,
+        priority: 'high' as const,
+      };
+
+      const published = await this.rabbitMQService.publishEmail(emailMessage);
+      if (published) {
+        this.logger.log(`✅ Nomination invite queued for ${participant.participantEmail}`);
+      }
+      return published;
+    } catch (error) {
+      this.logger.error(`❌ Error sending nomination invite:`, error);
+      return false;
+    }
+  }
 }

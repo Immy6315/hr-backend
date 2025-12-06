@@ -316,5 +316,94 @@ export class UserSurveysService {
     userSurvey.isDeleted = true;
     await userSurvey.save();
   }
+
+  async addNominee(
+    surveyId: string,
+    participantEmail: string,
+    dto: { respondentName: string; respondentEmail: string; relationship: string },
+  ): Promise<SurveyParticipant> {
+    const survey = await this.surveysService.findOne(surveyId);
+    if (!survey) throw new NotFoundException('Survey not found');
+
+    // Find the participant (nominator) to check if they're invited
+    const participant = await this.participantModel.findOne({
+      surveyId: new Types.ObjectId(surveyId),
+      participantEmail: participantEmail.toLowerCase(),
+      isDeleted: false,
+    });
+
+    if (!participant) {
+      throw new NotFoundException('You are not a participant of this survey');
+    }
+
+    // Check if nominations are allowed for this participant
+    // Allow if:
+    // 1. Nominations are generally open (isOpen=true), OR
+    // 2. Participant was explicitly invited (has nominationStatus set by admin)
+    const isInvitedParticipant = participant.nominationStatus !== undefined &&
+      participant.nominationStatus !== null;
+
+    if (!survey.nominationConfig?.isOpen && !isInvitedParticipant) {
+      throw new BadRequestException('Nominations are closed for this survey');
+    }
+
+    // Check allowed relationships
+    if (
+      survey.nominationConfig.allowedRelationships &&
+      !survey.nominationConfig.allowedRelationships.includes(dto.relationship)
+    ) {
+      throw new BadRequestException(`Relationship '${dto.relationship}' is not allowed`);
+    }
+
+    // Check for duplicate nominee
+    const existing = await this.participantModel.findOne({
+      surveyId: new Types.ObjectId(surveyId),
+      participantEmail: participantEmail,
+      respondentEmail: dto.respondentEmail,
+    });
+
+    if (existing) {
+      throw new BadRequestException('This respondent has already been nominated');
+    }
+
+    // Create new nominee
+    const nominee = new this.participantModel({
+      surveyId: new Types.ObjectId(surveyId),
+      participantName: 'Self', // Placeholder, will be linked to the subject
+      participantEmail: participantEmail,
+      respondentName: dto.respondentName,
+      respondentEmail: dto.respondentEmail,
+      relationship: dto.relationship,
+      verificationStatus: 'pending',
+      addedBy: 'participant',
+      nominatedBy: participantEmail,
+    });
+
+    return nominee.save();
+  }
+
+  async getNominees(surveyId: string, participantEmail: string): Promise<SurveyParticipant[]> {
+    return this.participantModel.find({
+      surveyId: new Types.ObjectId(surveyId),
+      nominatedBy: participantEmail,
+    }).exec();
+  }
+
+  async removeNominee(nomineeId: string, participantEmail: string): Promise<void> {
+    const nominee = await this.participantModel.findOne({
+      _id: nomineeId,
+      nominatedBy: participantEmail,
+    });
+
+    if (!nominee) {
+      throw new NotFoundException('Nominee not found');
+    }
+
+    if (nominee.verificationStatus === 'verified') {
+      throw new BadRequestException('Cannot remove a verified nominee');
+    }
+
+    await this.participantModel.deleteOne({ _id: nomineeId }).exec();
+  }
 }
 

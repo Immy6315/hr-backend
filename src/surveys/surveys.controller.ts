@@ -247,6 +247,7 @@ export class SurveysController {
         reminderSettings: survey.reminderSettings || null,
         projectDetails: survey.projectDetails || null,
         ratingScale: survey.ratingScale || [],
+        nominationConfig: survey.nominationConfig || null,
         startDate: survey.startDate,
         endDate: survey.endDate,
         createdAt: survey.createdAt,
@@ -283,7 +284,28 @@ export class SurveysController {
   @ApiResponse({ status: 404, description: 'Survey not found' })
   @ApiResponse({ status: 403, description: 'Forbidden - not your survey' })
   async update(@Param('id') id: string, @Body() updateSurveyDto: UpdateSurveyDto, @Req() req: any) {
-    return this.surveysService.update(id, updateSurveyDto, req.user.userId);
+    return this.surveysService.update(id, updateSurveyDto, {
+      userId: req.user.userId,
+      role: req.user.role,
+      organizationId: req.user.organizationId || req.user.user?.organizationId?.toString(),
+    });
+  }
+
+  @Patch(':id/nomination-config')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Update survey nomination configuration' })
+  @ApiResponse({ status: 200, description: 'Configuration updated successfully' })
+  async updateNominationConfig(
+    @Param('id') id: string,
+    @Body() config: any, // Using any for now, ideally UpdateNominationConfigDto
+    @Req() req: any,
+  ) {
+    return this.surveysService.updateNominationConfig(id, config, {
+      userId: req.user.userId,
+      role: req.user.role,
+      organizationId: req.user.organizationId || req.user.user?.organizationId?.toString(),
+    });
   }
 
   @Get(':id/user-surveys')
@@ -327,8 +349,29 @@ export class SurveysController {
   @ApiResponse({ status: 404, description: 'Survey not found' })
   @ApiResponse({ status: 403, description: 'Forbidden - not your survey' })
   async remove(@Param('id') id: string, @Req() req: any) {
-    await this.surveysService.remove(id, req.user.userId);
+    await this.surveysService.remove(id, {
+      userId: req.user.userId,
+      role: req.user.role,
+      organizationId: req.user.organizationId || req.user.user?.organizationId?.toString(),
+    });
     return { message: 'Survey deleted successfully' };
+  }
+  @Post(':surveyId/participants/:participantId/invite')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Send invitation to a participant' })
+  @ApiResponse({ status: 200, description: 'Invitation sent successfully' })
+  @ApiResponse({ status: 404, description: 'Participant not found' })
+  async inviteParticipant(
+    @Param('surveyId') surveyId: string,
+    @Param('participantId') participantId: string,
+    @Req() req: any,
+  ) {
+    return this.participantsService.inviteParticipant(surveyId, participantId, {
+      userId: req.user.userId,
+      role: req.user.role,
+      organizationId: req.user.organizationId || req.user.user?.organizationId?.toString(),
+    });
   }
 }
 

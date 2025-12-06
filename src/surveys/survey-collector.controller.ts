@@ -91,7 +91,12 @@ export class SurveyCollectorController {
           try {
             const survey = await this.surveysService.findOne(p.surveyId.toString());
             // Filter out deleted or draft surveys
-            if (survey.isDeleted || survey.status === 'draft' || survey.status === 'archived') {
+            // Filter out deleted or archived surveys
+            // Allow draft ONLY if nominations are open
+            const isDraft = survey.status === 'draft';
+            const isNominationOpen = survey.nominationConfig?.isOpen;
+
+            if (survey.isDeleted || survey.status === 'archived' || (isDraft && !isNominationOpen)) {
               return null;
             }
             return {
@@ -103,6 +108,7 @@ export class SurveyCollectorController {
               completionStatus: p.completionStatus,
               isLocked: p.isLocked,
               completedAt: p.surveyCompletedAt,
+              nominationStatus: p.nominationStatus,
             };
           } catch (e) {
             return null;
@@ -158,11 +164,39 @@ export class SurveyCollectorController {
       throw new BadRequestException('Invalid token');
     }
 
-    // Find all participants by username (email)
+    // Find all participants by username (email) - include as participant OR respondent
+    // Use case-insensitive regex to match emails
+    const emailRegex = new RegExp(`^${username.trim()}$`, 'i');
+
+    console.log('🔍 Looking for participants with email:', username);
+    console.log('🔍 Using regex:', emailRegex);
+
     const participants = await this.participantModel.find({
-      username: username.toLowerCase().trim(),
+      $or: [
+        { participantEmail: emailRegex },
+        { respondentEmail: emailRegex }
+      ],
       isDeleted: false,
     });
+
+    console.log('✅ Found participants:', participants.length);
+    if (participants.length > 0) {
+      console.log('📋 Participant details:', participants.map(p => ({
+        _id: p._id,
+        participantEmail: p.participantEmail,
+        respondentEmail: p.respondentEmail,
+        surveyId: p.surveyId,
+        addedBy: p.addedBy,
+        nominationStatus: p.nominationStatus,
+        isDeleted: p.isDeleted
+      })));
+    } else {
+      console.log('❌ NO PARTICIPANTS FOUND for email:', username);
+      return {
+        message: 'No surveys assigned',
+        data: [],
+      };
+    }
 
     if (!participants || participants.length === 0) {
       return {
@@ -172,34 +206,100 @@ export class SurveyCollectorController {
     }
 
     const surveys = (await Promise.all(
-      participants.map(async (p) => {
-        try {
-          const survey = await this.surveysService.findOne(p.surveyId.toString());
-          // Filter out deleted or draft surveys
-          if (survey.isDeleted || survey.status === 'draft' || survey.status === 'archived') {
+      participants
+        // CRITICAL FIX: Only process records where user is the main participant
+        // Main participant = participantEmail matches AND (respondentEmail is same OR missing)
+        .filter(p => {
+          const userEmailLower = username.toLowerCase();
+          const participantEmailMatch = p.participantEmail?.toLowerCase() === userEmailLower;
+          const respondentEmailMatch = p.respondentEmail?.toLowerCase() === userEmailLower;
+
+          // Main participant record has:
+          // 1. participantEmail = user's email
+          // 2. AND (respondentEmail = participantEmail for Self, OR respondentEmail missing/different)
+          const isSelfRecord = p.participantEmail?.toLowerCase() === p.respondentEmail?.toLowerCase();
+          const isMainParticipant = participantEmailMatch && (isSelfRecord || !p.respondentEmail);
+
+          // Nominee record has:
+          // - respondentEmail = user's email BUT participantEmail != user's email
+          const isNomineeRecord = respondentEmailMatch && !participantEmailMatch;
+
+          console.log(`🔍 Filtering ${p._id}:`, {
+            participantEmail: p.participantEmail,
+            respondentEmail: p.respondentEmail,
+            isMainParticipant,
+            isNomineeRecord,
+            include: isMainParticipant && !isNomineeRecord
+          });
+
+          return isMainParticipant && !isNomineeRecord;
+        })
+        .map(async (p) => {
+          try {
+            console.log(`🔎 Fetching survey for participantId: ${p._id}, surveyId: ${p.surveyId}`);
+            const survey = await this.surveysService.findOne(p.surveyId.toString());
+
+            console.log(`📊 Survey found: ${survey.name}, status: ${survey.status}, isDeleted: ${survey.isDeleted}`);
+            console.log(`📋 Nomination config:`, survey.nominationConfig);
+            console.log(`👤 Participant addedBy: ${p.addedBy}`);
+
+            const isDraft = survey.status === 'draft';
+            const isNominationOpen = survey.nominationConfig?.isOpen;
+
+            console.log(`🔍 Draft check: isDraft=${isDraft}, isNominationOpen=${isNominationOpen}`);
+
+            // Filter logic: 
+            // - Always filter deleted or archived surveys
+            // - For draft surveys: only show to explicitly invited participants
+            // Invited participant = addedBy is 'admin'/'system' OR has nominationStatus (was invited for nominations)
+            const isInvitedParticipant = p.addedBy === 'admin' || p.addedBy === 'system' ||
+              (p.nominationStatus !== undefined && p.nominationStatus !== null);
+
+            // Filter draft ONLY if nominations are closed AND participant is NOT invited
+            const shouldFilterDraft = isDraft && isNominationOpen === false && !isInvitedParticipant;
+
+            console.log(`🔍 Filter check: isDeleted=${survey.isDeleted}, isArchived=${survey.status === 'archived'}, isInvited=${isInvitedParticipant}, nominationStatus=${p.nominationStatus}, shouldFilterDraft=${shouldFilterDraft}`);
+
+            if (survey.isDeleted || survey.status === 'archived' || shouldFilterDraft) {
+              console.log(`❌ Survey filtered out: ${survey.name}`);
+              return null;
+            }
+
+            console.log(`✅ Survey included: ${survey.name}`);
+            return {
+              surveyId: p.surveyId.toString(),
+              participantId: p._id.toString(),
+              surveyName: survey.name,
+              assesseeName: p.participantName,
+              relationship: p.relationship,
+              status: survey.status,
+              dueDate: survey.endDate,
+              completionStatus: p.completionStatus,
+              isLocked: p.isLocked,
+              completedAt: p.surveyCompletedAt,
+              nominationConfig: survey.nominationConfig || { isOpen: false }, // Always include nominationConfig
+              nominationStatus: p.nominationStatus,
+            };
+          } catch (e) {
+            console.error(`❌ Error fetching survey for participant ${p._id}:`, e.message);
             return null;
           }
-          return {
-            surveyId: p.surveyId.toString(),
-            participantId: p._id.toString(),
-            surveyName: survey.name,
-            assesseeName: p.participantName,
-            relationship: p.relationship,
-            status: survey.status,
-            dueDate: survey.endDate,
-            completionStatus: p.completionStatus,
-            isLocked: p.isLocked,
-            completedAt: p.surveyCompletedAt,
-          };
-        } catch (e) {
-          return null;
-        }
-      })
+        })
     )).filter(Boolean);
+
+    // Deduplicate by surveyId - only return unique surveys
+    const uniqueSurveys = surveys.reduce((acc, survey) => {
+      if (!acc.find(s => s.surveyId === survey.surveyId)) {
+        acc.push(survey);
+      }
+      return acc;
+    }, []);
+
+    console.log(`📊 Final surveys count: ${uniqueSurveys.length}`);
 
     return {
       message: 'Surveys fetched successfully',
-      data: surveys,
+      data: uniqueSurveys,
     };
   }
   @Get(':surveyId/:pageId?')
@@ -260,7 +360,11 @@ export class SurveyCollectorController {
           if (mongoose.Types.ObjectId.isValid(participantId)) {
             const participant = await this.participantModel.findById(participantId);
             if (participant && participant.surveyId.toString() === surveyId) {
-              userId = participant.respondentEmail; // Use email as identifier
+              userId = participant.respondentEmail; // Use email              
+              // Generate token for Nomination Dashboard
+              // Use username or email as identifier
+              const identifier = participant.username || participant.participantEmail || participant.respondentEmail;
+              token = Buffer.from(`user:${identifier}:${Date.now()}`).toString('base64');
 
               // Find existing response or create new one
               userSurvey = await this.userSurveysService.findByUserAndSurvey(userId, surveyId);
@@ -462,6 +566,7 @@ export class SurveyCollectorController {
           timeLimit: null,
           createdAt: survey.createdAt,
           updatedAt: survey.updatedAt,
+          nominationConfig: survey.nominationConfig,
         },
         token: token || null,
         userId: userId || null,

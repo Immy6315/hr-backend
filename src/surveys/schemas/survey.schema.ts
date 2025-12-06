@@ -131,6 +131,14 @@ export class Survey extends Document {
   })
   ratingScale?: Array<{ weight: number; label: string; description?: string }>;
 
+  @Prop({ type: Object, default: {} })
+  nominationConfig?: {
+    isOpen: boolean;
+    allowedRelationships: string[];
+    requirements: Array<{ relationship: string; minCount: number }>;
+    instructions?: string;
+  };
+
   @Prop({ type: Date })
   createdAt?: Date;
 

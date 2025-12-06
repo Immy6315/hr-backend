@@ -179,38 +179,7 @@ export class SurveysService {
 
     // Authorization checks when userContext is provided (builder/admin side)
     if (userContext) {
-      const ctx =
-        typeof userContext === 'string'
-          ? { userId: userContext }
-          : userContext;
-
-      // If only userId is provided (legacy check), keep existing "createdBy" ownership check
-      if (ctx && ctx.role === undefined && ctx.organizationId === undefined && ctx.userId) {
-        if (survey.createdBy && survey.createdBy.toString() !== ctx.userId) {
-          throw new ForbiddenException('You do not have permission to access this survey');
-        }
-      } else if (ctx && ctx.role) {
-        const role = ctx.role;
-
-        // Super admin can access any survey
-        if (role === 'super_admin') {
-          // no-op
-        } else if (role === 'org_admin' || role === 'org_sub_admin') {
-          // Org-level users can only access surveys from their organization (if org is set)
-          if (survey.organizationId && ctx.organizationId) {
-            if (survey.organizationId.toString() !== ctx.organizationId.toString()) {
-              throw new ForbiddenException(
-                'You do not have permission to access surveys from another organization',
-              );
-            }
-          }
-        } else {
-          // For participants/other roles, fall back to strict createdBy check when userId present
-          if (ctx.userId && survey.createdBy && survey.createdBy.toString() !== ctx.userId) {
-            throw new ForbiddenException('You do not have permission to access this survey');
-          }
-        }
-      }
+      this.checkPermission(survey, userContext);
     }
 
     // Fetch pages from separate collection
@@ -538,16 +507,22 @@ export class SurveysService {
     return require('crypto').randomBytes(16).toString('hex');
   }
 
-  async update(id: string, updateSurveyDto: UpdateSurveyDto, userId?: string): Promise<Survey> {
+  async update(
+    id: string,
+    updateSurveyDto: UpdateSurveyDto,
+    userContext?: string | { userId?: string; role?: any; organizationId?: string | null },
+  ): Promise<Survey> {
     const survey = await this.surveyModel.findOne({ _id: id, isDeleted: false }).exec();
     if (!survey) {
       throw new NotFoundException(`Survey with ID ${id} not found`);
     }
 
-    // Verify ownership if userId is provided
-    if (userId && survey.createdBy && survey.createdBy.toString() !== userId) {
-      throw new ForbiddenException('You do not have permission to update this survey');
+    // Verify permissions
+    if (userContext) {
+      this.checkPermission(survey, userContext);
     }
+
+    const userId = typeof userContext === 'string' ? userContext : userContext?.userId;
 
     // Store old values for audit log
     const oldValue: any = {
@@ -673,15 +648,42 @@ export class SurveysService {
     return updatedSurvey;
   }
 
-  async remove(id: string, userId?: string): Promise<void> {
+  async updateNominationConfig(
+    id: string,
+    config: {
+      isOpen: boolean;
+      allowedRelationships: string[];
+      requirements: Array<{ relationship: string; minCount: number }>;
+      instructions?: string;
+    },
+    userContext?: string | { userId?: string; role?: any; organizationId?: string | null },
+  ): Promise<Survey> {
     const survey = await this.surveyModel.findOne({ _id: id, isDeleted: false }).exec();
     if (!survey) {
       throw new NotFoundException(`Survey with ID ${id} not found`);
     }
 
-    // Verify ownership if userId is provided
-    if (userId && survey.createdBy && survey.createdBy.toString() !== userId) {
-      throw new ForbiddenException('You do not have permission to delete this survey');
+    // Verify permissions
+    if (userContext) {
+      this.checkPermission(survey, userContext);
+    }
+
+    survey.nominationConfig = config;
+    return survey.save();
+  }
+
+  async remove(
+    id: string,
+    userContext?: string | { userId?: string; role?: any; organizationId?: string | null },
+  ): Promise<void> {
+    const survey = await this.surveyModel.findOne({ _id: id, isDeleted: false }).exec();
+    if (!survey) {
+      throw new NotFoundException(`Survey with ID ${id} not found`);
+    }
+
+    // Verify permissions
+    if (userContext) {
+      this.checkPermission(survey, userContext);
     }
 
     survey.isDeleted = true;
@@ -856,6 +858,50 @@ export class SurveysService {
     };
 
     return this.create(createSurveyDto, createdBy, organizationId);
+  }
+
+  private checkPermission(
+    survey: Survey,
+    userContext: string | { userId?: string; role?: any; organizationId?: string | null },
+  ) {
+    const ctx =
+      typeof userContext === 'string'
+        ? { userId: userContext }
+        : userContext;
+
+    // If only userId is provided (legacy check), keep existing "createdBy" ownership check
+    if (ctx && ctx.role === undefined && ctx.organizationId === undefined && ctx.userId) {
+      if (survey.createdBy && survey.createdBy.toString() !== ctx.userId) {
+        throw new ForbiddenException('You do not have permission to access this survey');
+      }
+      return;
+    }
+
+    if (ctx && ctx.role) {
+      const role = ctx.role;
+
+      // Super admin can access any survey
+      if (role === 'super_admin') {
+        return;
+      }
+
+      if (role === 'org_admin' || role === 'org_sub_admin') {
+        // Org-level users can only access surveys from their organization (if org is set)
+        if (survey.organizationId && ctx.organizationId) {
+          if (survey.organizationId.toString() !== ctx.organizationId.toString()) {
+            throw new ForbiddenException(
+              'You do not have permission to access surveys from another organization',
+            );
+          }
+          return;
+        }
+      }
+
+      // For participants/other roles, fall back to strict createdBy check when userId present
+      if (ctx.userId && survey.createdBy && survey.createdBy.toString() !== ctx.userId) {
+        throw new ForbiddenException('You do not have permission to access this survey');
+      }
+    }
   }
 }
 

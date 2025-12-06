@@ -24,6 +24,30 @@ export class SurveyParticipant extends Document {
   @Prop()
   relationship?: string;
 
+  // Nomination fields
+  @Prop({
+    type: String,
+    enum: ['pending', 'verified', 'rejected'],
+    default: 'verified', // Default to verified for admin-added
+  })
+  verificationStatus: string;
+
+  @Prop({
+    type: String,
+    enum: ['admin', 'participant'],
+    default: 'admin',
+  })
+  addedBy: string;
+
+  @Prop()
+  nominatedBy?: string; // Email of the participant who nominated this respondent
+
+  @Prop({
+    type: String,
+    enum: ['not_started', 'in_progress', 'submitted'],
+  })
+  nominationStatus?: string; // Status of the subject's nomination process
+
   // Credential fields for participant/respondent login
   @Prop()
   username?: string; // Auto-generated from email or custom
