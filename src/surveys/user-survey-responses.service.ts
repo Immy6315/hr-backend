@@ -917,14 +917,35 @@ export class UserSurveyResponsesService {
     // --- Data Rows ---
     let rowIndex = 6;
     let qCounter = 1;
+    let globalIndex = 0;
 
     pages.forEach(page => {
       const pageObj = page.toObject ? page.toObject() : page;
       (pageObj.questions || []).forEach((q: any) => {
         if (q.isDeleted) return;
 
+        // Generate Hashes for Matching
+        const crypto = require('crypto');
+        const hashIndex = crypto.createHash('md5')
+          .update(`${pageObj._id?.toString() || ''}-${globalIndex}-${q.text}-${q.type}`)
+          .digest('hex');
+        globalIndex++;
+
+        let hashUnique = null;
+        if (q.uniqueOrder !== undefined) {
+          hashUnique = crypto.createHash('md5')
+            .update(`${pageObj._id?.toString() || ''}-${q.uniqueOrder}-${q.text}-${q.type}`)
+            .digest('hex');
+        }
+
         // Find response
-        const response = responses.find(r => String(r.questionId) === String(q.questionId || q.uniqueOrder) || String(r.questionId) === String(q._id));
+        const response = responses.find(r =>
+          String(r.questionId) === String(q.questionId) ||
+          (q.uniqueOrder !== undefined && String(r.questionId) === String(q.uniqueOrder)) ||
+          String(r.questionId) === String(q._id) ||
+          String(r.questionId) === hashIndex ||
+          (hashUnique && String(r.questionId) === hashUnique)
+        );
         const qType = q.type;
 
         if (['matrix_radio', 'matrix_checkbox', 'MATRIX_RADIO_BOX', 'MATRIX_CHECK_BOX'].includes(qType)) {
@@ -946,7 +967,6 @@ export class UserSurveyResponsesService {
           // 2. Add Rows for each Statement
           const rows = q.rows || q.gridRows || [];
           const columns = q.columns || q.gridColumns || [];
-          const crypto = require('crypto');
 
           // Calculate Max Weight for this question
           const maxWeight = Math.max(...columns.map((c: any) => Number(c.weight || 0)));
@@ -954,9 +974,9 @@ export class UserSurveyResponsesService {
           // Generate stable questionId for hashing
           let questionIdForRowCol = q.questionId;
           if (!questionIdForRowCol && q.uniqueOrder !== undefined) {
-            questionIdForRowCol = crypto.createHash('md5')
-              .update(`${pageObj._id?.toString() || ''}-${q.uniqueOrder}-${q.text}-${q.type}`)
-              .digest('hex');
+            questionIdForRowCol = hashUnique;
+          } else if (!questionIdForRowCol) {
+            questionIdForRowCol = hashIndex;
           }
 
           const ansArray = (response && response.response && Array.isArray(response.response)) ? response.response : [];
@@ -1130,12 +1150,34 @@ export class UserSurveyResponsesService {
 
     let qCounter = 1;
 
+    let globalIndex = 0;
+
     pages.forEach(page => {
       const pageObj = page.toObject ? page.toObject() : page;
       (pageObj.questions || []).forEach((q: any) => {
         if (q.isDeleted) return;
 
-        const response = responses.find(r => String(r.questionId) === String(q.questionId || q.uniqueOrder) || String(r.questionId) === String(q._id));
+        // Generate Hashes for Matching
+        const crypto = require('crypto');
+        const hashIndex = crypto.createHash('md5')
+          .update(`${pageObj._id?.toString() || ''}-${globalIndex}-${q.text}-${q.type}`)
+          .digest('hex');
+        globalIndex++;
+
+        let hashUnique = null;
+        if (q.uniqueOrder !== undefined) {
+          hashUnique = crypto.createHash('md5')
+            .update(`${pageObj._id?.toString() || ''}-${q.uniqueOrder}-${q.text}-${q.type}`)
+            .digest('hex');
+        }
+
+        const response = responses.find(r =>
+          String(r.questionId) === String(q.questionId) ||
+          (q.uniqueOrder !== undefined && String(r.questionId) === String(q.uniqueOrder)) ||
+          String(r.questionId) === String(q._id) ||
+          String(r.questionId) === hashIndex ||
+          (hashUnique && String(r.questionId) === hashUnique)
+        );
         const qType = q.type;
 
         if (['matrix_radio', 'matrix_checkbox', 'MATRIX_RADIO_BOX', 'MATRIX_CHECK_BOX'].includes(qType)) {
@@ -1153,9 +1195,9 @@ export class UserSurveyResponsesService {
 
           let questionIdForRowCol = q.questionId;
           if (!questionIdForRowCol && q.uniqueOrder !== undefined) {
-            questionIdForRowCol = crypto.createHash('md5')
-              .update(`${pageObj._id?.toString() || ''}-${q.uniqueOrder}-${q.text}-${q.type}`)
-              .digest('hex');
+            questionIdForRowCol = hashUnique;
+          } else if (!questionIdForRowCol) {
+            questionIdForRowCol = hashIndex;
           }
 
           const ansArray = (response && response.response && Array.isArray(response.response)) ? response.response : [];
@@ -1368,19 +1410,32 @@ export class UserSurveyResponsesService {
     let currentRow = 3; // Start after title
 
     // --- Iterate Questions ---
-    questions.forEach((question: any) => {
+    // --- Iterate Questions ---
+    questions.forEach((question: any, index: number) => {
       const qType = question.type;
       const summaryData: any[] = [];
       let summaryColumns: any[] = [];
 
+      // Generate Hashes for Matching
+      const crypto = require('crypto');
+      const hashIndex = crypto.createHash('md5')
+        .update(`${question.pageId?.toString() || ''}-${index}-${question.text}-${question.type}`)
+        .digest('hex');
+
+      let hashUnique = null;
+      if (question.uniqueOrder !== undefined) {
+        hashUnique = crypto.createHash('md5')
+          .update(`${question.pageId?.toString() || ''}-${question.uniqueOrder}-${question.text}-${question.type}`)
+          .digest('hex');
+      }
+
       // Filter answers for this question
-      // We need to match by questionId OR uniqueOrder OR hash (similar to exportQuestionResponses logic)
-      // For simplicity here, we assume questionId or uniqueOrder match. 
-      // If hashes are needed, we'd replicate the hash generation logic.
-      // Let's stick to direct ID matching first as it covers most cases.
       const questionAnswers = allAnswers.filter(a =>
-        String(a.questionId) === String(question.questionId || question.uniqueOrder) ||
-        String(a.questionId) === String(question._id)
+        String(a.questionId) === String(question.questionId) ||
+        (question.uniqueOrder !== undefined && String(a.questionId) === String(question.uniqueOrder)) ||
+        String(a.questionId) === String(question._id) ||
+        String(a.questionId) === hashIndex ||
+        (hashUnique && String(a.questionId) === hashUnique)
       );
 
       // --- MATRIX QUESTIONS ---
@@ -1392,17 +1447,25 @@ export class UserSurveyResponsesService {
         const rows = question.rows || question.gridRows || [];
         const columns = question.columns || question.gridColumns || [];
 
+        // Determine questionIdForRowCol for Matrix Row Hash Generation
+        let questionIdForRowCol = question.questionId;
+        if (!questionIdForRowCol && question.uniqueOrder !== undefined) {
+          questionIdForRowCol = hashUnique;
+        } else if (!questionIdForRowCol) {
+          questionIdForRowCol = hashIndex;
+        }
+
         if (rows) {
           rows.forEach((row: any, idx: number) => {
             const rowText = row.text || row.label || `Statement ${idx + 1}`;
-            const rowId = row.id || crypto.createHash('md5').update(`${question.questionId}-row-${idx}-${rowText}`).digest('hex');
+            const rowId = row.id || crypto.createHash('md5').update(`${questionIdForRowCol}-row-${idx}-${rowText}`).digest('hex');
             rowMap.set(rowId, rowText);
           });
         }
         if (columns) {
           columns.forEach((col: any, idx: number) => {
             const colText = col.text || col.label || `Option ${idx + 1}`;
-            const colId = col.id || crypto.createHash('md5').update(`${question.questionId}-column-${idx}-${colText}`).digest('hex');
+            const colId = col.id || crypto.createHash('md5').update(`${questionIdForRowCol}-column-${idx}-${colText}`).digest('hex');
             colMap.set(colId, colText);
             if (col.weight !== undefined) colWeightMap.set(colId, Number(col.weight));
           });
@@ -1699,9 +1762,25 @@ export class UserSurveyResponsesService {
       const qType = question.type;
       content.push({ text: `${index + 1}. ${question.text}`, style: 'questionHeader' });
 
+      // Generate Hashes for Matching
+      const crypto = require('crypto');
+      const hashIndex = crypto.createHash('md5')
+        .update(`${question.pageId?.toString() || ''}-${index}-${question.text}-${question.type}`)
+        .digest('hex');
+
+      let hashUnique = null;
+      if (question.uniqueOrder !== undefined) {
+        hashUnique = crypto.createHash('md5')
+          .update(`${question.pageId?.toString() || ''}-${question.uniqueOrder}-${question.text}-${question.type}`)
+          .digest('hex');
+      }
+
       const questionAnswers = allAnswers.filter(a =>
-        String(a.questionId) === String(question.questionId || question.uniqueOrder) ||
-        String(a.questionId) === String(question._id)
+        String(a.questionId) === String(question.questionId) ||
+        (question.uniqueOrder !== undefined && String(a.questionId) === String(question.uniqueOrder)) ||
+        String(a.questionId) === String(question._id) ||
+        String(a.questionId) === hashIndex ||
+        (hashUnique && String(a.questionId) === hashUnique)
       );
 
       let summaryData: any[] = [];
@@ -1716,17 +1795,25 @@ export class UserSurveyResponsesService {
         const rows = question.rows || question.gridRows || [];
         const columns = question.columns || question.gridColumns || [];
 
+        // Determine questionIdForRowCol for Matrix Row Hash Generation
+        let questionIdForRowCol = question.questionId;
+        if (!questionIdForRowCol && question.uniqueOrder !== undefined) {
+          questionIdForRowCol = crypto.createHash('md5')
+            .update(`${question.pageId?.toString() || ''}-${question.uniqueOrder}-${question.text}-${question.type}`)
+            .digest('hex');
+        }
+
         if (rows) {
           rows.forEach((row: any, idx: number) => {
             const rowText = row.text || row.label || `Statement ${idx + 1}`;
-            const rowId = row.id || crypto.createHash('md5').update(`${question.questionId}-row-${idx}-${rowText}`).digest('hex');
+            const rowId = row.id || crypto.createHash('md5').update(`${questionIdForRowCol}-row-${idx}-${rowText}`).digest('hex');
             rowMap.set(rowId, rowText);
           });
         }
         if (columns) {
           columns.forEach((col: any, idx: number) => {
             const colText = col.text || col.label || `Option ${idx + 1}`;
-            const colId = col.id || crypto.createHash('md5').update(`${question.questionId}-column-${idx}-${colText}`).digest('hex');
+            const colId = col.id || crypto.createHash('md5').update(`${questionIdForRowCol}-column-${idx}-${colText}`).digest('hex');
             colMap.set(colId, colText);
             if (col.weight !== undefined) colWeightMap.set(colId, Number(col.weight));
           });
@@ -1909,19 +1996,47 @@ export class UserSurveyResponsesService {
     // 1. Find Question
     const pages = await this.surveyPageModel
       .find({ surveyId: new Types.ObjectId(surveyId), isDeleted: false })
+      .sort({ pageIndex: 1 })
       .exec();
 
-    let targetQuestion: any = null;
-    for (const page of pages) {
+    const questions: any[] = [];
+    pages.forEach(page => {
       const pageObj = page.toObject ? page.toObject() : page;
-      const found = (pageObj.questions || []).find((q: any) =>
-        String(q.questionId) === questionId || String(q._id) === questionId
-      );
-      if (found) {
-        targetQuestion = found;
-        break;
+      (pageObj.questions || []).forEach(q => {
+        if (!q.isDeleted) {
+          questions.push({ ...q, pageId: pageObj._id });
+        }
+      });
+    });
+
+    let targetQuestion: any = null;
+    let targetHash: string | null = null;
+
+    // Find the question and generate its hash
+    questions.forEach((q: any, index: number) => {
+      const crypto = require('crypto');
+      // Match getSurveyAnalytics logic
+      const hashIndex = crypto.createHash('md5')
+        .update(`${q.pageId?.toString() || ''}-${index}-${q.text}-${q.type}`)
+        .digest('hex');
+
+      let hashUnique = null;
+      if (q.uniqueOrder !== undefined) {
+        hashUnique = crypto.createHash('md5')
+          .update(`${q.pageId?.toString() || ''}-${q.uniqueOrder}-${q.text}-${q.type}`)
+          .digest('hex');
       }
-    }
+
+      // Check for match
+      if (String(q.questionId) === questionId ||
+        String(q.uniqueOrder) === questionId ||
+        String(q._id) === questionId ||
+        hashIndex === questionId ||
+        (hashUnique && hashUnique === questionId)) {
+        targetQuestion = q;
+        targetHash = hashIndex;
+      }
+    });
 
     if (!targetQuestion) throw new NotFoundException('Question not found');
 
@@ -1932,14 +2047,18 @@ export class UserSurveyResponsesService {
     }).exec();
 
     const responseIds = allUserSurveys.map(r => r._id);
+
+    // Query responses using input ID and calculated Hash/UniqueOrder
+    const queryIds = [questionId];
+    if (targetQuestion.questionId) queryIds.push(targetQuestion.questionId);
+    if (targetQuestion.uniqueOrder !== undefined) queryIds.push(String(targetQuestion.uniqueOrder));
+    if (targetHash && targetHash !== questionId) queryIds.push(targetHash);
+    if (targetQuestion._id) queryIds.push(String(targetQuestion._id));
+
     const allAnswers = await this.responseModel.find({
       userSurveyId: { $in: responseIds },
       isDeleted: false,
-      $or: [
-        { questionId: targetQuestion.questionId },
-        { questionId: targetQuestion._id },
-        { questionId: targetQuestion.uniqueOrder }
-      ]
+      questionId: { $in: queryIds }
     }).exec();
 
     // 3. Generate PDF Content
@@ -1962,17 +2081,25 @@ export class UserSurveyResponsesService {
       const rows = targetQuestion.rows || targetQuestion.gridRows || [];
       const columns = targetQuestion.columns || targetQuestion.gridColumns || [];
 
+      // Determine questionIdForRowCol for Matrix Row Hash Generation
+      let questionIdForRowCol = targetQuestion.questionId;
+      if (!questionIdForRowCol && targetQuestion.uniqueOrder !== undefined) {
+        questionIdForRowCol = crypto.createHash('md5')
+          .update(`${targetQuestion.pageId?.toString() || ''}-${targetQuestion.uniqueOrder}-${targetQuestion.text}-${targetQuestion.type}`)
+          .digest('hex');
+      }
+
       if (rows) {
         rows.forEach((row: any, idx: number) => {
           const rowText = row.text || row.label || `Statement ${idx + 1}`;
-          const rowId = row.id || crypto.createHash('md5').update(`${targetQuestion.questionId}-row-${idx}-${rowText}`).digest('hex');
+          const rowId = row.id || crypto.createHash('md5').update(`${questionIdForRowCol}-row-${idx}-${rowText}`).digest('hex');
           rowMap.set(rowId, rowText);
         });
       }
       if (columns) {
         columns.forEach((col: any, idx: number) => {
           const colText = col.text || col.label || `Option ${idx + 1}`;
-          const colId = col.id || crypto.createHash('md5').update(`${targetQuestion.questionId}-column-${idx}-${colText}`).digest('hex');
+          const colId = col.id || crypto.createHash('md5').update(`${questionIdForRowCol}-column-${idx}-${colText}`).digest('hex');
           colMap.set(colId, colText);
           if (col.weight !== undefined) colWeightMap.set(colId, Number(col.weight));
         });
@@ -1982,11 +2109,14 @@ export class UserSurveyResponsesService {
         const matrixCounts: Record<string, Record<string, number>> = {};
         rows.forEach((row: any) => {
           const rowText = rowMap.get(row.id) || row.text;
-          matrixCounts[rowText] = {};
-          columns.forEach((col: any) => {
-            const colText = colMap.get(col.id) || col.text;
-            matrixCounts[rowText][colText] = 0;
-          });
+          // Only initialize if rowText is valid
+          if (rowText) {
+            matrixCounts[rowText] = {};
+            columns.forEach((col: any) => {
+              const colText = colMap.get(col.id) || col.text;
+              if (colText) matrixCounts[rowText][colText] = 0;
+            });
+          }
         });
 
         allAnswers.forEach(r => {
@@ -1995,7 +2125,7 @@ export class UserSurveyResponsesService {
             if (typeof ans === 'object' && ans !== null) {
               const rowText = rowMap.get(ans.rowId) || ans.rowId;
               const colText = colMap.get(ans.columnId) || ans.columnId;
-              if (matrixCounts[rowText] && matrixCounts[rowText][colText] !== undefined) {
+              if (rowText && colText && matrixCounts[rowText] && matrixCounts[rowText][colText] !== undefined) {
                 matrixCounts[rowText][colText]++;
               }
             }

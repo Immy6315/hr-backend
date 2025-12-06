@@ -7,6 +7,10 @@ export enum AuditLogAction {
   DELETED = 'deleted',
   PUBLISHED = 'published',
   RESPONSE_COLLECTED = 'response_collected',
+  INVITE_SENT = 'invite_sent',
+  NOMINATION_SUBMITTED = 'nomination_submitted',
+  NOMINATION_VERIFIED = 'nomination_verified',
+  NOMINATION_REJECTED = 'nomination_rejected',
 }
 
 export enum AuditLogEntityType {
@@ -14,6 +18,8 @@ export enum AuditLogEntityType {
   PAGE = 'page',
   QUESTION = 'question',
   RESPONSE = 'response',
+  PARTICIPANT = 'participant',
+  NOMINATION = 'nomination',
 }
 
 @Schema({ timestamps: true })
@@ -21,8 +27,11 @@ export class SurveyAuditLog extends Document {
   @Prop({ type: Types.ObjectId, ref: 'Survey', required: true, index: true })
   surveyId: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'User', required: true, index: true })
-  userId: Types.ObjectId;
+  @Prop({ type: Types.ObjectId, ref: 'User', required: false, index: true })
+  userId?: Types.ObjectId;
+
+  @Prop({ type: String })
+  performedBy?: string; // Email or name if userId is not available (e.g. participant)
 
   @Prop({ type: String, enum: AuditLogAction, required: true })
   action: AuditLogAction;

@@ -50,6 +50,23 @@ export enum UserPermission {
   // 5. Communications - Settings
   SURVEY_COMMUNICATIONS_SETTINGS_VIEW = 'survey:communications:settings:view',
 
+  // 6. Nominations
+  SURVEY_VIEW_NOMINATIONS = 'survey:view:nominations',
+  NOMINATION_SETTINGS_VIEW = 'nomination:settings:view',
+  NOMINATION_PARTICIPANT_ADD = 'nomination:participant:add',
+  NOMINATION_EMAIL_SEND = 'nomination:email:send',
+  NOMINATION_VERIFY = 'nomination:verify',
+  NOMINATION_REJECT = 'nomination:reject',
+  NOMINATION_PARTICIPANT_EDIT = 'nomination:participant:edit',
+  NOMINATION_PARTICIPANT_DELETE = 'nomination:participant:delete',
+
+  // 7. Reports
+  REPORT_OVERVIEW_VIEW = 'report:overview:view',
+  REPORT_QUESTION_ANALYSIS_VIEW = 'report:question_analysis:view',
+  REPORT_QUESTION_ANALYSIS_DOWNLOAD = 'report:question_analysis:download',
+  REPORT_INDIVIDUAL_RESPONSES_VIEW = 'report:individual_responses:view',
+  REPORT_INDIVIDUAL_RESPONSES_DOWNLOAD = 'report:individual_responses:download',
+
   NOMINATION_VIEW = 'nomination:view',
   SURVEY_PARTICIPATE = 'survey:participate',
 }
@@ -69,6 +86,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<UserRole, UserPermission[]> = {
     UserPermission.SURVEY_VIEW_BUILDER,
     UserPermission.SURVEY_VIEW_PARTICIPANTS,
     UserPermission.SURVEY_VIEW_COMMUNICATIONS,
+    UserPermission.SURVEY_VIEW_NOMINATIONS,
     UserPermission.SURVEY_VIEW_REPORTS,
     UserPermission.SURVEY_VIEW_AUDIT_LOGS,
     // Summary
@@ -95,6 +113,20 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<UserRole, UserPermission[]> = {
     UserPermission.SURVEY_COMMUNICATIONS_REMINDER_VIEW,
     UserPermission.SURVEY_COMMUNICATIONS_REMINDER_EDIT,
     UserPermission.SURVEY_COMMUNICATIONS_SETTINGS_VIEW,
+    // Nominations - Full access
+    UserPermission.NOMINATION_SETTINGS_VIEW,
+    UserPermission.NOMINATION_PARTICIPANT_ADD,
+    UserPermission.NOMINATION_EMAIL_SEND,
+    UserPermission.NOMINATION_VERIFY,
+    UserPermission.NOMINATION_REJECT,
+    UserPermission.NOMINATION_PARTICIPANT_EDIT,
+    UserPermission.NOMINATION_PARTICIPANT_DELETE,
+    // Reports - Full access
+    UserPermission.REPORT_OVERVIEW_VIEW,
+    UserPermission.REPORT_QUESTION_ANALYSIS_VIEW,
+    UserPermission.REPORT_QUESTION_ANALYSIS_DOWNLOAD,
+    UserPermission.REPORT_INDIVIDUAL_RESPONSES_VIEW,
+    UserPermission.REPORT_INDIVIDUAL_RESPONSES_DOWNLOAD,
   ],
   [UserRole.ORG_SUB_ADMIN]: [
     UserPermission.SURVEY_CREATE,
@@ -104,6 +136,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<UserRole, UserPermission[]> = {
     UserPermission.SURVEY_VIEW_SUMMARY,
     UserPermission.SURVEY_VIEW_BUILDER,
     UserPermission.SURVEY_VIEW_PARTICIPANTS,
+    UserPermission.SURVEY_VIEW_NOMINATIONS,
     UserPermission.SURVEY_VIEW_REPORTS,
     // Summary
     UserPermission.SURVEY_SUMMARY_EDIT,
@@ -116,8 +149,12 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<UserRole, UserPermission[]> = {
     // Participants - Add and Edit only (NO upload or delete)
     UserPermission.SURVEY_PARTICIPANTS_ADD,
     UserPermission.SURVEY_PARTICIPANTS_EDIT,
-    // Communications - NONE (can be granted via User Management)
-    // Reports - View access via SURVEY_VIEW_REPORTS
+    // Nominations - View only by default
+    UserPermission.NOMINATION_SETTINGS_VIEW,
+    // Reports - View only
+    UserPermission.REPORT_OVERVIEW_VIEW,
+    UserPermission.REPORT_QUESTION_ANALYSIS_VIEW,
+    UserPermission.REPORT_INDIVIDUAL_RESPONSES_VIEW,
   ],
   [UserRole.PARTICIPANT]: [
     UserPermission.NOMINATION_VIEW,

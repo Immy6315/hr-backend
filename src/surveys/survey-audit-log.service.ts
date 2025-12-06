@@ -8,11 +8,11 @@ export class SurveyAuditLogService {
   constructor(
     @InjectModel(SurveyAuditLog.name)
     private auditLogModel: Model<SurveyAuditLog>,
-  ) {}
+  ) { }
 
   async logActivity(
     surveyId: string,
-    userId: string,
+    user: { userId?: string; performedBy?: string },
     action: AuditLogAction,
     entityType: AuditLogEntityType,
     options?: {
@@ -36,7 +36,8 @@ export class SurveyAuditLogService {
 
     const auditLog = new this.auditLogModel({
       surveyId: new Types.ObjectId(surveyId),
-      userId: new Types.ObjectId(userId),
+      userId: user.userId ? new Types.ObjectId(user.userId) : undefined,
+      performedBy: user.performedBy,
       action,
       entityType,
       entityId,
@@ -73,7 +74,7 @@ export class SurveyAuditLogService {
     entityName?: string,
   ): string {
     const entityDisplay = entityName || entityType;
-    
+
     switch (action) {
       case AuditLogAction.CREATED:
         if (entityType === AuditLogEntityType.SURVEY) {
@@ -82,9 +83,11 @@ export class SurveyAuditLogService {
           return `created a page "${entityDisplay}"`;
         } else if (entityType === AuditLogEntityType.QUESTION) {
           return `created a question`;
+        } else if (entityType === AuditLogEntityType.PARTICIPANT) {
+          return `added participant "${entityDisplay}"`;
         }
         return `created ${entityType}`;
-      
+
       case AuditLogAction.UPDATED:
         if (entityType === AuditLogEntityType.SURVEY) {
           return `updated the survey`;
@@ -92,23 +95,39 @@ export class SurveyAuditLogService {
           return `updated the page "${entityDisplay}"`;
         } else if (entityType === AuditLogEntityType.QUESTION) {
           return `updated a question`;
+        } else if (entityType === AuditLogEntityType.PARTICIPANT) {
+          return `updated participant "${entityDisplay}"`;
         }
         return `updated ${entityType}`;
-      
+
       case AuditLogAction.DELETED:
         if (entityType === AuditLogEntityType.PAGE) {
           return `deleted the page "${entityDisplay}"`;
         } else if (entityType === AuditLogEntityType.QUESTION) {
           return `deleted a question`;
+        } else if (entityType === AuditLogEntityType.PARTICIPANT) {
+          return `removed participant "${entityDisplay}"`;
         }
         return `deleted ${entityType}`;
-      
+
       case AuditLogAction.PUBLISHED:
         return `published the survey`;
-      
+
       case AuditLogAction.RESPONSE_COLLECTED:
         return `A new response has been collected from an anonymous user`;
-      
+
+      case AuditLogAction.INVITE_SENT:
+        return `sent an invitation to "${entityDisplay}"`;
+
+      case AuditLogAction.NOMINATION_SUBMITTED:
+        return `submitted nominations for "${entityDisplay}"`;
+
+      case AuditLogAction.NOMINATION_VERIFIED:
+        return `verified nominations for "${entityDisplay}"`;
+
+      case AuditLogAction.NOMINATION_REJECTED:
+        return `rejected nominations for "${entityDisplay}"`;
+
       default:
         return `${action} ${entityType}`;
     }

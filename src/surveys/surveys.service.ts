@@ -66,7 +66,7 @@ export class SurveysService {
     if (createdBy) {
       await this.auditLogService.logActivity(
         savedSurvey._id.toString(),
-        createdBy,
+        { userId: createdBy },
         AuditLogAction.CREATED,
         AuditLogEntityType.SURVEY,
         {
@@ -540,7 +540,7 @@ export class SurveysService {
       if (survey.status !== 'active' && updateSurveyDto.status === 'active' && userId) {
         await this.auditLogService.logActivity(
           id,
-          userId,
+          { userId: userId },
           AuditLogAction.PUBLISHED,
           AuditLogEntityType.SURVEY,
           {
@@ -635,7 +635,7 @@ export class SurveysService {
 
       await this.auditLogService.logActivity(
         id,
-        userId,
+        { userId: userId },
         AuditLogAction.UPDATED,
         AuditLogEntityType.SURVEY,
         {

@@ -575,6 +575,11 @@ export class SurveyCollectorController {
         currentPageNumber,
         previousPageId,
         nextPageId,
+        nominationStatus: userSurvey ? undefined : (await this.participantModel.findOne({
+          surveyId: new Types.ObjectId(surveyId),
+          $or: [{ participantEmail: new RegExp(`^${userId}$`, 'i') }, { respondentEmail: new RegExp(`^${userId}$`, 'i') }],
+          isDeleted: false
+        }))?.nominationStatus,
       },
     };
   }

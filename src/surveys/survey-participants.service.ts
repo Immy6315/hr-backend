@@ -5,6 +5,8 @@ import { SurveyParticipant } from './schemas/survey-participant.schema';
 import { CreateSurveyParticipantDto, UpdateSurveyParticipantDto } from './dto/create-participant.dto';
 import { SurveysService } from './surveys.service';
 import { EmailService } from '../email/email.service';
+import { SurveyAuditLogService } from './survey-audit-log.service';
+import { AuditLogAction, AuditLogEntityType } from './schemas/survey-audit-log.schema';
 import * as XLSX from 'xlsx';
 
 interface AccessContext {
@@ -20,6 +22,7 @@ export class SurveyParticipantsService {
     private readonly participantModel: Model<SurveyParticipant>,
     private readonly surveysService: SurveysService,
     private readonly emailService: EmailService,
+    private readonly auditLogService: SurveyAuditLogService,
   ) { }
 
   private normalizeStatus(status?: string) {
@@ -109,6 +112,30 @@ export class SurveyParticipantsService {
     return {
       participant: saved,
       plainPassword: credentials.password, // Plain password to be sent via email
+    };
+
+    // Log participant creation
+    await this.auditLogService.logActivity(
+      surveyId,
+      { userId: ctx.userId },
+      AuditLogAction.CREATED,
+      AuditLogEntityType.PARTICIPANT,
+      {
+        entityId: saved._id.toString(),
+        entityName: saved.participantName,
+        newValue: {
+          name: saved.participantName,
+          email: saved.participantEmail,
+          respondentName: saved.respondentName,
+          respondentEmail: saved.respondentEmail,
+          relationship: saved.relationship,
+        },
+      },
+    );
+
+    return {
+      participant: saved,
+      plainPassword: credentials.password,
     };
   }
 
@@ -223,7 +250,21 @@ export class SurveyParticipantsService {
     }
 
     participant.verificationStatus = 'verified';
-    return participant.save();
+    const saved = await participant.save();
+
+    await this.auditLogService.logActivity(
+      surveyId,
+      { userId: ctx.userId },
+      AuditLogAction.NOMINATION_VERIFIED,
+      AuditLogEntityType.NOMINATION,
+      {
+        entityId: saved._id.toString(),
+        entityName: saved.respondentName,
+        description: `verified nomination for ${saved.respondentName} (${saved.relationship})`,
+      },
+    );
+
+    return saved;
   }
 
   async reject(surveyId: string, participantId: string, ctx: AccessContext) {
@@ -240,6 +281,18 @@ export class SurveyParticipantsService {
 
     participant.verificationStatus = 'rejected';
     await participant.save();
+
+    await this.auditLogService.logActivity(
+      surveyId,
+      { userId: ctx.userId },
+      AuditLogAction.NOMINATION_REJECTED,
+      AuditLogEntityType.NOMINATION,
+      {
+        entityId: participant._id.toString(),
+        entityName: participant.respondentName,
+        description: `rejected nomination for ${participant.respondentName} (${participant.relationship})`,
+      },
+    );
 
     // Reset the nominator's nomination status to allow re-submission
     if (participant.nominatedBy) {
@@ -303,20 +356,51 @@ export class SurveyParticipantsService {
     // 4. Send Email
     // Use 'participantInvite' template if available, otherwise default
     // We want to emphasize that this is for BOTH survey and nominations
-    const template = survey.communicationTemplates?.participantInvite || {
-      subject: 'Invitation to 360° Feedback Survey & Nomination',
-      text: 'You have been invited to participate in a 360° Feedback Survey. Please log in to nominate your respondents and complete your self-assessment.',
-      html: `
-        <p>You have been invited to participate in a 360° Feedback Survey.</p>
-        <p><strong>Action Required:</strong></p>
-        <ul>
-          <li>Log in to the portal.</li>
-          <li><strong>Nominate</strong> your peers, managers, and direct reports (if applicable).</li>
-          <li>Complete your <strong>Self-Assessment</strong>.</li>
-        </ul>
-        <p>Please ensure you complete these steps by the due date.</p>
-      `
-    };
+    // 4. Send Email
+    // Use a professional default template if the stored one looks like the generic seed data
+    // or if no template is provided.
+    let template = survey.communicationTemplates?.participantInvite;
+
+    // Check if we should override with our professional default
+    // We override if it's missing, or if it contains the generic "This message is sent to" text
+    const isGenericTemplate = template?.text?.includes('This message is sent to') ||
+      template?.html?.includes('This message is sent to');
+
+    if (!template || isGenericTemplate) {
+      template = {
+        subject: 'Action Required: Nominate Respondents for {surveyname}',
+        text: `Dear {assesseename},
+
+You have been selected to participate in the {surveyname}.
+
+The first step in this process is to nominate the colleagues who will provide feedback for you.
+
+Your Next Steps:
+1. Log in to the portal using the button below.
+2. Go to the "Nominations" section.
+3. Add your peers, direct reports, and managers.
+4. Submit your nominations for approval.
+
+Please complete your nominations by {duedate}.`,
+        html: `
+          <p>Dear {assesseename},</p>
+          <p>You have been selected to participate in the <strong>{surveyname}</strong>.</p>
+          <p>The first step in this process is to <strong>nominate the colleagues</strong> who will provide feedback for you.</p>
+          
+          <div style="background-color: #f0f9ff; border-left: 4px solid #0ea5e9; padding: 16px; margin: 24px 0;">
+            <h3 style="margin-top: 0; color: #0369a1; font-size: 16px;">Your Next Steps:</h3>
+            <ol style="margin-bottom: 0; padding-left: 20px; color: #334155;">
+              <li style="margin-bottom: 8px;"><strong>Log in</strong> to the portal using the credentials below.</li>
+              <li style="margin-bottom: 8px;">Go to the <strong>Nominations</strong> section.</li>
+              <li style="margin-bottom: 8px;"><strong>Add</strong> your peers, direct reports, and managers.</li>
+              <li><strong>Submit</strong> your nominations for approval.</li>
+            </ol>
+          </div>
+
+          <p>Please complete your nominations by <strong>{duedate}</strong>.</p>
+        `
+      };
+    }
 
     // We use sendSurveyParticipantInvite which sends login credentials
     const emailSent = await this.emailService.sendSurveyParticipantInvite(
@@ -329,6 +413,18 @@ export class SurveyParticipantsService {
     if (!emailSent) {
       throw new BadRequestException('Failed to send invitation email');
     }
+
+    await this.auditLogService.logActivity(
+      surveyId,
+      { userId: ctx.userId },
+      AuditLogAction.INVITE_SENT,
+      AuditLogEntityType.PARTICIPANT,
+      {
+        entityId: participant._id.toString(),
+        entityName: participant.respondentName,
+        description: `sent invitation to ${participant.respondentName} (${participant.respondentEmail})`,
+      },
+    );
 
     return { message: 'Invitation sent successfully' };
   }
@@ -367,7 +463,38 @@ export class SurveyParticipantsService {
       participant.verificationStatus = dto.verificationStatus;
     }
 
-    return participant.save();
+    const oldValue = {
+      name: participant.participantName,
+      email: participant.participantEmail,
+      respondentName: participant.respondentName,
+      respondentEmail: participant.respondentEmail,
+      relationship: participant.relationship,
+      status: participant.completionStatus,
+    };
+
+    const saved = await participant.save();
+
+    await this.auditLogService.logActivity(
+      surveyId,
+      { userId: ctx.userId },
+      AuditLogAction.UPDATED,
+      AuditLogEntityType.PARTICIPANT,
+      {
+        entityId: saved._id.toString(),
+        entityName: saved.participantName,
+        oldValue,
+        newValue: {
+          name: saved.participantName,
+          email: saved.participantEmail,
+          respondentName: saved.respondentName,
+          respondentEmail: saved.respondentEmail,
+          relationship: saved.relationship,
+          status: saved.completionStatus,
+        },
+      },
+    );
+
+    return saved;
   }
 
   async remove(surveyId: string, participantId: string, ctx: AccessContext) {
@@ -402,6 +529,17 @@ export class SurveyParticipantsService {
     // Proceed with deletion
     participant.isDeleted = true;
     await participant.save();
+
+    await this.auditLogService.logActivity(
+      surveyId,
+      { userId: ctx.userId },
+      AuditLogAction.DELETED,
+      AuditLogEntityType.PARTICIPANT,
+      {
+        entityId: participant._id.toString(),
+        entityName: participant.participantName || participant.respondentName,
+      },
+    );
 
     return participant;
   }

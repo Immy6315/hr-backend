@@ -370,6 +370,7 @@ If you didn’t request this change, you can ignore this email.
         loginurl: loginUrl,
         duedate: survey.endDate ? new Date(survey.endDate).toLocaleDateString() : 'TBD',
         supportemail: 'support@eztuitions.com',
+        surveyname: survey.name || '360° Feedback Survey',
       };
 
       let subject = template?.subject || '360° Feedback : Self Assessment Invite';
@@ -382,13 +383,50 @@ If you didn’t request this change, you can ignore this email.
       textBody = replaceTemplateVariables(textBody, variables);
       htmlBody = replaceTemplateVariables(htmlBody, variables);
 
-      // Append login credentials section to HTML
-      htmlBody += `
-        <div style="background: #f8fafc; border-radius: 12px; padding: 20px; margin: 24px 0; border: 1px solid #e2e8f0;">
-          <p style="margin: 0 0 12px 0; font-weight: 600; color: #334155;">Here are your login details:</p>
-          <p style="margin: 4px 0;"><strong>Login URL:</strong> <a href="${loginUrl}" style="color: #3b5bdb;">${loginUrl}</a></p>
-          <p style="margin: 4px 0;"><strong>Username:</strong> ${variables.username}</p>
-          <p style="margin: 4px 0;"><strong>Password:</strong> <code style="background: #dbeafe; padding: 4px 8px; border-radius: 4px; font-family: monospace;">${plainPassword}</code></p>
+      // Use the 'Invitation to join' design style
+      htmlBody = `
+        <div style="font-family: 'Inter', Arial, sans-serif; max-width: 640px; margin: 0 auto; padding: 32px; background: #f7f8fb; color: #101828;">
+          <div style="background: #ffffff; border-radius: 18px; border: 1px solid #edf0f6; padding: 32px; box-shadow: 0 20px 45px rgba(15, 23, 42, 0.08);">
+            <div style="text-align: center; margin-bottom: 24px;">
+              <h1 style="color: #3b5bdb; margin: 0; font-size: 26px; letter-spacing: 0.04em;">${this.appName}</h1>
+              <p style="color: #475467; font-size: 13px; margin-top: 4px;">AI-driven human capital advisory</p>
+            </div>
+
+            <div style="background: linear-gradient(120deg, #eef2ff, #fdf2ff); border-radius: 16px; padding: 24px; margin-bottom: 28px; text-align: center;">
+              <p style="margin: 0; color: #344054; font-size: 13px; letter-spacing: 0.22em; text-transform: uppercase;">Invitation to Participate</p>
+              <h2 style="margin: 10px 0 0; font-size: 24px; font-weight: 600; color: #101828;">${variables.surveyname}</h2>
+            </div>
+
+            <div style="font-size: 15px; line-height: 1.6; color: #475467; margin-bottom: 24px;">
+               ${htmlBody} 
+            </div>
+
+            <div style="background: #f8fafc; border-radius: 14px; padding: 18px 20px; margin: 24px 0;">
+              <p style="margin: 0 0 12px 0; font-size: 13px; text-transform: uppercase; letter-spacing: 0.2em; color: #98a2b3; font-weight: 600;">Your Login Credentials</p>
+              <div style="font-size: 14px; color: #475467;">
+                <p style="margin: 4px 0;"><strong>Username:</strong> ${variables.username}</p>
+                <p style="margin: 4px 0;"><strong>Password:</strong> <code style="background: #e2e8f0; padding: 2px 6px; border-radius: 4px; font-family: monospace; color: #0f172a;">${plainPassword}</code></p>
+              </div>
+            </div>
+
+            <div style="text-align: center; margin: 28px 0;">
+              <a href="${loginUrl}" style="background: #3b5bdb; color: #fff; padding: 14px 34px; border-radius: 999px; font-size: 15px; font-weight: 600; text-decoration: none; display: inline-block;">
+                Login to Portal
+              </a>
+            </div>
+
+            <p style="font-size: 13px; color: #98a2b3; margin-top: 0;">If the button doesn’t work, copy and paste this link into your browser:</p>
+            <p style="font-size: 12px; color: #3b5bdb; word-break: break-all; margin-top: 4px;">${loginUrl}</p>
+
+            <hr style="border: none; border-top: 1px solid #edf0f6; margin: 28px 0;" />
+
+            <p style="font-size: 12px; color: #98a2b3; text-align: center; margin: 0;">
+              Please complete your tasks by ${variables.duedate}.
+            </p>
+          </div>
+          <p style="text-align: center; font-size: 11px; color: #98a2b3; margin-top: 16px;">
+            © ${new Date().getFullYear()} ${this.appName}. All rights reserved.
+          </p>
         </div>
       `;
 
@@ -396,6 +434,7 @@ If you didn’t request this change, you can ignore this email.
         to: participant.respondentEmail,
         subject,
         text: textBody + `\n\nLogin URL: ${loginUrl}\nUsername: ${variables.username}\nPassword: ${plainPassword}`,
+        html: htmlBody,
         priority: 'high' as const,
       };
 
@@ -444,12 +483,50 @@ If you didn’t request this change, you can ignore this email.
       textBody = replaceTemplateVariables(textBody, variables);
       htmlBody = replaceTemplateVariables(htmlBody, variables);
 
-      htmlBody += `
-        <div style="background: #f8fafc; border-radius: 12px; padding: 20px; margin: 24px 0; border: 1px solid #e2e8f0;">
-          <p style="margin: 0 0 12px 0; font-weight: 600; color: #334155;">Here are your login details:</p>
-          <p style="margin: 4px 0;"><strong>Login URL:</strong> <a href="${loginUrl}" style="color: #3b5bdb;">${loginUrl}</a></p>
-          <p style="margin: 4px 0;"><strong>Username:</strong> ${variables.username}</p>
-          <p style="margin: 4px 0;"><strong>Password:</strong> <code style="background: #dbeafe; padding: 4px 8px; border-radius: 4px; font-family: monospace;">${plainPassword}</code></p>
+      // Use the 'Invitation to join' design style
+      htmlBody = `
+        <div style="font-family: 'Inter', Arial, sans-serif; max-width: 640px; margin: 0 auto; padding: 32px; background: #f7f8fb; color: #101828;">
+          <div style="background: #ffffff; border-radius: 18px; border: 1px solid #edf0f6; padding: 32px; box-shadow: 0 20px 45px rgba(15, 23, 42, 0.08);">
+            <div style="text-align: center; margin-bottom: 24px;">
+              <h1 style="color: #3b5bdb; margin: 0; font-size: 26px; letter-spacing: 0.04em;">${this.appName}</h1>
+              <p style="color: #475467; font-size: 13px; margin-top: 4px;">AI-driven human capital advisory</p>
+            </div>
+
+            <div style="background: linear-gradient(120deg, #eef2ff, #fdf2ff); border-radius: 16px; padding: 24px; margin-bottom: 28px; text-align: center;">
+              <p style="margin: 0; color: #344054; font-size: 13px; letter-spacing: 0.22em; text-transform: uppercase;">Invitation to Participate</p>
+              <h2 style="margin: 10px 0 0; font-size: 24px; font-weight: 600; color: #101828;">360° Feedback Survey</h2>
+            </div>
+
+            <div style="font-size: 15px; line-height: 1.6; color: #475467; margin-bottom: 24px;">
+               ${htmlBody} 
+            </div>
+
+            <div style="background: #f8fafc; border-radius: 14px; padding: 18px 20px; margin: 24px 0;">
+              <p style="margin: 0 0 12px 0; font-size: 13px; text-transform: uppercase; letter-spacing: 0.2em; color: #98a2b3; font-weight: 600;">Your Login Credentials</p>
+              <div style="font-size: 14px; color: #475467;">
+                <p style="margin: 4px 0;"><strong>Username:</strong> ${variables.username}</p>
+                <p style="margin: 4px 0;"><strong>Password:</strong> <code style="background: #e2e8f0; padding: 2px 6px; border-radius: 4px; font-family: monospace; color: #0f172a;">${plainPassword}</code></p>
+              </div>
+            </div>
+
+            <div style="text-align: center; margin: 28px 0;">
+              <a href="${loginUrl}" style="background: #3b5bdb; color: #fff; padding: 14px 34px; border-radius: 999px; font-size: 15px; font-weight: 600; text-decoration: none; display: inline-block;">
+                Login to Portal
+              </a>
+            </div>
+
+            <p style="font-size: 13px; color: #98a2b3; margin-top: 0;">If the button doesn’t work, copy and paste this link into your browser:</p>
+            <p style="font-size: 12px; color: #3b5bdb; word-break: break-all; margin-top: 4px;">${loginUrl}</p>
+
+            <hr style="border: none; border-top: 1px solid #edf0f6; margin: 28px 0;" />
+
+            <p style="font-size: 12px; color: #98a2b3; text-align: center; margin: 0;">
+              Please complete your tasks by ${variables.duedate}.
+            </p>
+          </div>
+          <p style="text-align: center; font-size: 11px; color: #98a2b3; margin-top: 16px;">
+            © ${new Date().getFullYear()} ${this.appName}. All rights reserved.
+          </p>
         </div>
       `;
 
@@ -457,6 +534,7 @@ If you didn’t request this change, you can ignore this email.
         to: participant.respondentEmail,
         subject,
         text: textBody + `\n\nLogin URL: ${loginUrl}\nUsername: ${variables.username}\nPassword: ${plainPassword}`,
+        html: htmlBody,
         priority: 'high' as const,
       };
 

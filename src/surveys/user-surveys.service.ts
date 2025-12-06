@@ -6,6 +6,8 @@ import { Survey } from './schemas/survey.schema';
 import { SurveyParticipant } from './schemas/survey-participant.schema';
 import { CreateUserSurveyDto } from './dto/create-user-survey.dto';
 import { SurveysService } from './surveys.service';
+import { SurveyAuditLogService } from './survey-audit-log.service';
+import { AuditLogAction, AuditLogEntityType } from './schemas/survey-audit-log.schema';
 import * as crypto from 'crypto';
 
 @Injectable()
@@ -15,6 +17,7 @@ export class UserSurveysService {
     @InjectModel(Survey.name) private surveyModel: Model<Survey>,
     @InjectModel(SurveyParticipant.name) private participantModel: Model<SurveyParticipant>,
     private surveysService: SurveysService,
+    private auditLogService: SurveyAuditLogService,
   ) { }
 
   async create(
@@ -379,7 +382,26 @@ export class UserSurveysService {
       nominatedBy: participantEmail,
     });
 
-    return nominee.save();
+    const saved = await nominee.save();
+
+    await this.auditLogService.logActivity(
+      surveyId,
+      { performedBy: participantEmail },
+      AuditLogAction.CREATED,
+      AuditLogEntityType.NOMINATION,
+      {
+        entityId: saved._id.toString(),
+        entityName: saved.respondentName,
+        description: `nominated ${saved.respondentName} (${saved.relationship})`,
+        newValue: {
+          name: saved.respondentName,
+          email: saved.respondentEmail,
+          relationship: saved.relationship,
+        },
+      },
+    );
+
+    return saved;
   }
 
   async getNominees(surveyId: string, participantEmail: string): Promise<SurveyParticipant[]> {
@@ -404,6 +426,18 @@ export class UserSurveysService {
     }
 
     await this.participantModel.deleteOne({ _id: nomineeId }).exec();
+
+    await this.auditLogService.logActivity(
+      nominee.surveyId.toString(),
+      { performedBy: participantEmail },
+      AuditLogAction.DELETED,
+      AuditLogEntityType.NOMINATION,
+      {
+        entityId: nomineeId,
+        entityName: nominee.respondentName,
+        description: `removed nomination for ${nominee.respondentName}`,
+      },
+    );
   }
 }
 

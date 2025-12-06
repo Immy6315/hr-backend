@@ -22,6 +22,8 @@ import { SurveyParticipant } from './schemas/survey-participant.schema';
 import { Survey } from './schemas/survey.schema';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { Public } from '../auth/public.decorator';
+import { SurveyAuditLogService } from './survey-audit-log.service';
+import { AuditLogAction, AuditLogEntityType } from './schemas/survey-audit-log.schema';
 
 @ApiTags('Nominations')
 @Controller('nominations')
@@ -31,6 +33,7 @@ export class NominationsController {
         private readonly surveysService: SurveysService,
         @InjectModel(SurveyParticipant.name) private participantModel: Model<SurveyParticipant>,
         @InjectModel(Survey.name) private surveyModel: Model<Survey>,
+        private readonly auditLogService: SurveyAuditLogService,
     ) { }
 
     @Post('login')
@@ -196,7 +199,12 @@ export class NominationsController {
         // First, let's find the participant to see what we're working with
         const participant = await this.participantModel.findOne({
             surveyId: new Types.ObjectId(surveyId),
-            participantEmail: { $regex: new RegExp(`^${email}$`, 'i') } // Case-insensitive
+            participantEmail: { $regex: new RegExp(`^${email}$`, 'i') }, // Case-insensitive
+            $or: [
+                { relationship: 'Self' },
+                { respondentEmail: { $regex: new RegExp(`^${email}$`, 'i') } }
+            ],
+            isDeleted: false
         });
 
         console.log(`🔍 Found participant:`, participant ? {
@@ -220,6 +228,17 @@ export class NominationsController {
             matched: updateResult.matchedCount,
             modified: updateResult.modifiedCount
         });
+
+        await this.auditLogService.logActivity(
+            surveyId,
+            { performedBy: email },
+            AuditLogAction.NOMINATION_SUBMITTED,
+            AuditLogEntityType.NOMINATION,
+            {
+                entityName: 'Nominations',
+                description: `submitted nominations`,
+            },
+        );
 
         return { success: true, message: 'Nominations submitted successfully' };
     }

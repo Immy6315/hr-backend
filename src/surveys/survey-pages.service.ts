@@ -16,7 +16,7 @@ export class SurveyPagesService {
     private surveysService: SurveysService,
     @Inject(forwardRef(() => SurveyAuditLogService))
     private auditLogService: SurveyAuditLogService,
-  ) {}
+  ) { }
 
   async create(surveyId: string, pageData: { title: string; description?: string; uniqueOrder?: string; isDeleted?: boolean }, userId?: string): Promise<SurveyPageCollection> {
     // Verify survey exists
@@ -42,7 +42,7 @@ export class SurveyPagesService {
     if (userId) {
       await this.auditLogService.logActivity(
         surveyId,
-        userId,
+        { userId: userId },
         AuditLogAction.CREATED,
         AuditLogEntityType.PAGE,
         {
@@ -111,7 +111,7 @@ export class SurveyPagesService {
     if (userId) {
       await this.auditLogService.logActivity(
         surveyId,
-        userId,
+        { userId: userId },
         AuditLogAction.UPDATED,
         AuditLogEntityType.PAGE,
         {
@@ -132,10 +132,10 @@ export class SurveyPagesService {
 
   async delete(surveyId: string, pageId: string, userId?: string): Promise<void> {
     const page = await this.findOne(surveyId, pageId);
-    
+
     // Count non-deleted questions in this page before deleting
     const nonDeletedQuestionsCount = page.questions.filter((q: any) => !q.isDeleted).length;
-    
+
     page.isDeleted = true;
     await page.save();
 
@@ -155,7 +155,7 @@ export class SurveyPagesService {
     if (userId) {
       await this.auditLogService.logActivity(
         surveyId,
-        userId,
+        { userId: userId },
         AuditLogAction.DELETED,
         AuditLogEntityType.PAGE,
         {
