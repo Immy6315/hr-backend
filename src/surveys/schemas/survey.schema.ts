@@ -138,6 +138,11 @@ export class Survey extends Document {
     requirements: Array<{ relationship: string; minCount: number }>;
     instructions?: string;
     expiryDate?: Date;
+    participantReportConfig?: {
+      isEnabled: boolean;
+      minTotalResponses: number;
+      requirements: Array<{ relationship: string; minCount: number }>;
+    };
   };
 
   @Prop({ type: Object, default: {} })
