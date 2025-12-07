@@ -248,6 +248,7 @@ export class SurveysController {
         projectDetails: survey.projectDetails || null,
         ratingScale: survey.ratingScale || [],
         nominationConfig: survey.nominationConfig || null,
+        participantReportConfig: survey.participantReportConfig || null,
         startDate: survey.startDate,
         endDate: survey.endDate,
         createdAt: survey.createdAt,
@@ -302,6 +303,23 @@ export class SurveysController {
     @Req() req: any,
   ) {
     return this.surveysService.updateNominationConfig(id, config, {
+      userId: req.user.userId,
+      role: req.user.role,
+      organizationId: req.user.organizationId || req.user.user?.organizationId?.toString(),
+    });
+  }
+
+  @Patch(':id/participant-report-config')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Update survey participant report configuration' })
+  @ApiResponse({ status: 200, description: 'Configuration updated successfully' })
+  async updateParticipantReportConfig(
+    @Param('id') id: string,
+    @Body() config: any,
+    @Req() req: any,
+  ) {
+    return this.surveysService.updateParticipantReportConfig(id, config, {
       userId: req.user.userId,
       role: req.user.role,
       organizationId: req.user.organizationId || req.user.user?.organizationId?.toString(),

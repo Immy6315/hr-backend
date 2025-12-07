@@ -84,6 +84,9 @@ export class SurveyParticipant extends Document {
 
   @Prop({ type: Boolean, default: false })
   isDeleted: boolean;
+
+  createdAt?: Date;
+  updatedAt?: Date;
 }
 
 export const SurveyParticipantSchema = SchemaFactory.createForClass(SurveyParticipant);

@@ -672,6 +672,38 @@ export class SurveysService {
     return survey.save();
   }
 
+  async updateParticipantReportConfig(
+    id: string,
+    config: {
+      isEnabled: boolean;
+      minTotalResponses: number;
+      requirements: Array<{ relationship: string; minCount: number }>;
+    },
+    userContext?: string | { userId?: string; role?: any; organizationId?: string | null },
+  ): Promise<Survey> {
+    const survey = await this.surveyModel.findOne({ _id: id, isDeleted: false }).exec();
+    if (!survey) {
+      throw new NotFoundException(`Survey with ID ${id} not found`);
+    }
+
+    // Verify permissions
+    if (userContext) {
+      this.checkPermission(survey, userContext);
+    }
+
+    survey.participantReportConfig = config;
+
+    // Sync with nominationConfig.participantReportConfig as frontend expects it there
+    if (!survey.nominationConfig) {
+      survey.nominationConfig = { isOpen: false, allowedRelationships: [], requirements: [] };
+    }
+    survey.nominationConfig.participantReportConfig = config;
+    // Mark mixed type as modified to ensure Mongoose saves it
+    survey.markModified('nominationConfig');
+
+    return survey.save();
+  }
+
   async remove(
     id: string,
     userContext?: string | { userId?: string; role?: any; organizationId?: string | null },

@@ -142,7 +142,7 @@ export class SurveyParticipantsService {
   async findAll(
     surveyId: string,
     ctx: AccessContext,
-    options?: { page?: number; limit?: number; search?: string; status?: string; includeRejected?: boolean },
+    options?: { page?: number; limit?: number; search?: string; status?: string; verificationStatus?: string; includeRejected?: boolean },
   ) {
     await this.ensureSurveyAccess(surveyId, ctx);
 
@@ -154,9 +154,12 @@ export class SurveyParticipantsService {
       isDeleted: false,
     };
 
-    // Exclude rejected participants by default (Participants tab)
-    // Include them only if explicitly requested (Nominations page)
-    if (!options?.includeRejected) {
+    // Filter by verification status if provided
+    if (options?.verificationStatus) {
+      filter.verificationStatus = options.verificationStatus;
+    }
+    // Otherwise exclude rejected participants by default (unless explicitly included)
+    else if (!options?.includeRejected) {
       filter.verificationStatus = { $ne: 'rejected' };
     }
 
@@ -178,11 +181,6 @@ export class SurveyParticipantsService {
       surveyId: new Types.ObjectId(surveyId),
       isDeleted: false,
     };
-
-    // Same logic for status breakdown
-    if (!options?.includeRejected) {
-      baseMatch.verificationStatus = { $ne: 'rejected' };
-    }
 
     const [totalFiltered, participants, statusBreakdown] = await Promise.all([
       this.participantModel.countDocuments(filter),

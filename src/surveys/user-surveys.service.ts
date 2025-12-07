@@ -4,6 +4,7 @@ import { Model, Types } from 'mongoose';
 import { UserSurvey, UserSurveyStatus } from './schemas/user-survey.schema';
 import { Survey } from './schemas/survey.schema';
 import { SurveyParticipant } from './schemas/survey-participant.schema';
+import { UserSurveyResponse } from './schemas/user-survey-response.schema';
 import { CreateUserSurveyDto } from './dto/create-user-survey.dto';
 import { SurveysService } from './surveys.service';
 import { SurveyAuditLogService } from './survey-audit-log.service';
@@ -16,6 +17,7 @@ export class UserSurveysService {
     @InjectModel(UserSurvey.name) private userSurveyModel: Model<UserSurvey>,
     @InjectModel(Survey.name) private surveyModel: Model<Survey>,
     @InjectModel(SurveyParticipant.name) private participantModel: Model<SurveyParticipant>,
+    @InjectModel(UserSurveyResponse.name) private responseModel: Model<UserSurveyResponse>,
     private surveysService: SurveysService,
     private auditLogService: SurveyAuditLogService,
   ) { }
@@ -372,7 +374,7 @@ export class UserSurveysService {
     // Create new nominee
     const nominee = new this.participantModel({
       surveyId: new Types.ObjectId(surveyId),
-      participantName: 'Self', // Placeholder, will be linked to the subject
+      participantName: participant.participantName || 'Self',
       participantEmail: participantEmail,
       respondentName: dto.respondentName,
       respondentEmail: dto.respondentEmail,
@@ -439,5 +441,240 @@ export class UserSurveysService {
       },
     );
   }
-}
 
+  async getParticipantResponseCounts(surveyId: string, participantEmail: string): Promise<{ total: number; byRelationship: Record<string, number> }> {
+    // 1. Find the subject's assignments (nominees)
+    const nominees = await this.participantModel.find({
+      surveyId: new Types.ObjectId(surveyId),
+      participantEmail: { $regex: new RegExp(`^${participantEmail}$`, 'i') },
+      isDeleted: false
+    }).exec();
+
+    const nomineeIds = nominees.map(n => n._id);
+
+    // 2. Count completed surveys linked to these nominees
+    const responses = await this.userSurveyModel.find({
+      surveyId: new Types.ObjectId(surveyId),
+      surveyParticipantId: { $in: nomineeIds },
+      status: UserSurveyStatus.COMPLETED,
+      isDeleted: false
+    }).populate('surveyParticipantId').exec();
+
+    const byRelationship: Record<string, number> = {};
+    responses.forEach(r => {
+      const p = r.surveyParticipantId as any; // Populated
+      if (p && p.relationship) {
+        byRelationship[p.relationship] = (byRelationship[p.relationship] || 0) + 1;
+      }
+    });
+
+    return {
+      total: responses.length,
+      byRelationship
+    };
+  }
+
+  async getParticipantReportOverview(surveyId: string, participantEmail: string) {
+    const counts = await this.getParticipantResponseCounts(surveyId, participantEmail);
+
+    // Get timeline data
+    const nominees = await this.participantModel.find({
+      surveyId: new Types.ObjectId(surveyId),
+      participantEmail: { $regex: new RegExp(`^${participantEmail}$`, 'i') },
+      isDeleted: false
+    }).exec();
+    const nomineeIds = nominees.map(n => n._id);
+
+    const responses = await this.userSurveyModel.find({
+      surveyId: new Types.ObjectId(surveyId),
+      surveyParticipantId: { $in: nomineeIds },
+      status: UserSurveyStatus.COMPLETED,
+      isDeleted: false
+    }).sort({ completedAt: 1 }).exec();
+
+    // Group by date
+    const timelineMap = new Map<string, number>();
+    responses.forEach(r => {
+      if (r.completedAt) {
+        const date = r.completedAt.toISOString().split('T')[0];
+        timelineMap.set(date, (timelineMap.get(date) || 0) + 1);
+      }
+    });
+
+    const timelineData = Array.from(timelineMap.entries()).map(([date, count]) => ({ date, count }));
+
+    return {
+      total: counts.total,
+      completed: counts.total,
+      inProgress: 0,
+      notStarted: nominees.length - counts.total,
+      completionRate: nominees.length > 0 ? Math.round((counts.total / nominees.length) * 100) : 0,
+      timelineData
+    };
+  }
+
+  async getParticipantReportRespondents(surveyId: string, participantEmail: string) {
+    const nominees = await this.participantModel.find({
+      surveyId: new Types.ObjectId(surveyId),
+      participantEmail: { $regex: new RegExp(`^${participantEmail}$`, 'i') },
+      isDeleted: false
+    }).exec();
+
+    const nomineeIds = nominees.map(n => n._id);
+    const responses = await this.userSurveyModel.find({
+      surveyId: new Types.ObjectId(surveyId),
+      surveyParticipantId: { $in: nomineeIds },
+      isDeleted: false
+    }).exec();
+
+    const responseMap = new Map(responses.map(r => [r.surveyParticipantId?.toString(), r]));
+
+    return nominees.map(n => {
+      const response = responseMap.get(n._id.toString()) as any;
+      return {
+        id: n._id,
+        name: n.respondentName,
+        email: n.respondentEmail,
+        relationship: n.relationship,
+        status: response?.status || 'not_started',
+        progress: response?.answeredQuestions && response.totalQuestions ? Math.round((response.answeredQuestions / response.totalQuestions) * 100) : 0,
+        updatedAt: response?.updatedAt || n.updatedAt
+      };
+    });
+  }
+
+  async getParticipantReportAnalytics(surveyId: string, participantEmail: string) {
+    // 1. Get relevant UserSurvey IDs
+    const nominees = await this.participantModel.find({
+      surveyId: new Types.ObjectId(surveyId),
+      participantEmail: { $regex: new RegExp(`^${participantEmail}$`, 'i') },
+      isDeleted: false
+    }).exec();
+    const nomineeIds = nominees.map(n => n._id);
+
+    const responses = await this.userSurveyModel.find({
+      surveyId: new Types.ObjectId(surveyId),
+      surveyParticipantId: { $in: nomineeIds },
+      status: UserSurveyStatus.COMPLETED,
+      isDeleted: false
+    }).exec();
+
+    const userSurveyIds = responses.map(r => r._id);
+
+    if (userSurveyIds.length === 0) {
+      return [];
+    }
+
+    // 2. Fetch all answers for these responses
+    const allAnswers = await this.responseModel.find({
+      userSurveyId: { $in: userSurveyIds },
+      isDeleted: false
+    }).exec();
+
+    // 3. Get Survey Structure (Questions)
+    const survey = await this.surveysService.findOne(surveyId);
+    const questions: any[] = [];
+
+    (survey.pages || []).forEach((page: any) => {
+      (page.questions || []).forEach((q: any) => {
+        if (!q.isDeleted) {
+          questions.push({ ...q, pageId: page.id });
+        }
+      });
+    });
+
+    // 4. Aggregate Data
+    return questions.map(question => {
+      const qType = question.type;
+
+      // Filter answers for this question
+      const questionAnswers = allAnswers.filter(a =>
+        String(a.questionId) === String(question.questionId) ||
+        String(a.questionId) === String(question.id)
+      );
+
+      const answeredCount = questionAnswers.length;
+
+      // Basic aggregation based on type
+      let chartData: any[] = [];
+      let textResponses: string[] = [];
+
+      if (['single_choice', 'multiple_choice', 'dropdown', 'rating', 'nps', 'opinion_scale'].includes(qType)) {
+        const counts: Record<string, number> = {};
+        questionAnswers.forEach(a => {
+          const values = Array.isArray(a.response) ? a.response : [a.response];
+          values.forEach((v: any) => {
+            const key = String(v);
+            counts[key] = (counts[key] || 0) + 1;
+          });
+        });
+
+        if (question.options) {
+          chartData = question.options.map((opt: any) => ({
+            name: opt.text,
+            value: counts[String(opt.text)] || counts[String(opt.value)] || counts[String(opt.id)] || 0
+          }));
+        } else {
+          chartData = Object.entries(counts).map(([name, value]) => ({ name, value }));
+        }
+      } else if (['short_text', 'long_text'].includes(qType)) {
+        textResponses = questionAnswers.map(a => String(a.response)).filter(Boolean);
+      } else if (['matrix_radio', 'matrix_checkbox', 'MATRIX_RADIO_BOX', 'MATRIX_CHECK_BOX'].includes(qType)) {
+        // Handle Matrix
+        if (question.rows && question.columns) {
+          // Deep copy rows to avoid mutating the original survey object if it's cached/shared
+          // actually question is already a shallow copy from the map above, but rows need to be copied
+          question.rows = question.rows.map((r: any) => ({ ...r }));
+
+          question.rows.forEach((row: any) => {
+            // Initialize columns with counts for this row
+            row.columns = question.columns.map((col: any) => ({ ...col, count: 0 }));
+
+            // Iterate through all answers to this question
+            questionAnswers.forEach(a => {
+              const val = a.response;
+              // Matrix response format can be complex. 
+              // Usually: { rowId: "...", columnId: "..." } or array of objects
+              // Or sometimes object map { "rowId": "colId" }
+
+              if (Array.isArray(val)) {
+                // Check each item in the array
+                val.forEach((v: any) => {
+                  if (v && String(v.rowId) === String(row.id || row._id)) {
+                    const colId = String(v.columnId);
+                    const col = row.columns.find((c: any) => String(c.id || c._id) === colId);
+                    if (col) col.count++;
+                  }
+                });
+              } else if (typeof val === 'object' && val !== null) {
+                // Check if it's a single object { rowId, columnId }
+                if (val.rowId && String(val.rowId) === String(row.id || row._id)) {
+                  const colId = String(val.columnId);
+                  const col = row.columns.find((c: any) => String(c.id || c._id) === colId);
+                  if (col) col.count++;
+                }
+                // Check if it's a map { rowId: colId }
+                else if (val[String(row.id || row._id)]) {
+                  const colId = String(val[String(row.id || row._id)]);
+                  const col = row.columns.find((c: any) => String(c.id || c._id) === colId);
+                  if (col) col.count++;
+                }
+              }
+            });
+          });
+        }
+      }
+
+      return {
+        questionId: question.questionId,
+        text: question.text,
+        type: question.type,
+        answeredCount,
+        chartData,
+        textResponses,
+        rows: question.rows, // Include processed rows for Matrix
+        columns: question.columns // Include columns for reference
+      };
+    });
+  }
+}

@@ -10,8 +10,11 @@ import {
     UnauthorizedException,
     NotFoundException,
     BadRequestException,
+    ForbiddenException,
     Query,
+    Res,
 } from '@nestjs/common';
+import { Response } from 'express';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { UserSurveysService } from './user-surveys.service';
 import { SurveysService } from './surveys.service';
@@ -76,35 +79,18 @@ export class NominationsController {
     @Public()
     @ApiOperation({ summary: 'Get nomination configuration' })
     async getConfig(@Request() req: any, @Param('surveyId') surveyId: string) {
-        // Allow both nomination and participant tokens
-        const authHeader = req.headers.authorization;
-        if (!authHeader) {
-            throw new UnauthorizedException('No authorization token provided');
-        }
-
-        const token = authHeader.replace('Bearer ', '');
-        console.log('🔑 Config token received:', token);
-
-        // Try to validate - accept either participant token or nomination token
-        try {
-            // Participant token is base64 encoded "user:email:timestamp"
-            const decoded = Buffer.from(token, 'base64').toString('utf-8');
-            console.log('🔓 Decoded token:', decoded);
-
-            if (!decoded.includes(':')) {
-                throw new UnauthorizedException('Invalid token format');
-            }
-
-            // Valid token found
-            console.log('✅ Token validated successfully');
-        } catch (error) {
-            console.error('❌ Token validation failed:', error.message);
-            throw new UnauthorizedException('Invalid token');
-        }
+        const email = this.validateToken(req);
 
         const survey = await this.surveysService.findOne(surveyId);
-        console.log('📋 Returning nomination config:', survey.nominationConfig);
-        return survey.nominationConfig || { isOpen: false };
+
+        // Get response counts for the participant to show progress
+        const counts = await this.userSurveysService.getParticipantResponseCounts(surveyId, email);
+
+        return {
+            nominationConfig: survey.nominationConfig || { isOpen: false },
+            participantReportConfig: survey.participantReportConfig,
+            responseCounts: counts
+        };
     }
 
     private validateToken(req: any): string {
@@ -241,5 +227,58 @@ export class NominationsController {
         );
 
         return { success: true, message: 'Nominations submitted successfully' };
+    }
+
+    private async checkReportAccess(surveyId: string, email: string) {
+        const survey = await this.surveysService.findOne(surveyId);
+        const config = survey.participantReportConfig;
+
+        if (!config?.isEnabled) {
+            throw new ForbiddenException('Report access is not enabled for this survey');
+        }
+
+        const counts = await this.userSurveysService.getParticipantResponseCounts(surveyId, email);
+
+        if (counts.total < (config.minTotalResponses || 0)) {
+            throw new ForbiddenException(`You need at least ${config.minTotalResponses} responses to view the report. Current: ${counts.total}`);
+        }
+
+        if (config.requirements && config.requirements.length > 0) {
+            for (const req of config.requirements) {
+                const relCount = counts.byRelationship[req.relationship] || 0;
+                if (relCount < req.minCount) {
+                    throw new ForbiddenException(`You need at least ${req.minCount} responses from ${req.relationship}. Current: ${relCount}`);
+                }
+            }
+        }
+
+        return { survey };
+    }
+
+    @Get('report/overview')
+    @Public()
+    @ApiOperation({ summary: 'Get participant report overview' })
+    async getReportOverview(@Request() req: any, @Query('surveyId') surveyId: string) {
+        const email = this.validateToken(req);
+        await this.checkReportAccess(surveyId, email);
+        return this.userSurveysService.getParticipantReportOverview(surveyId, email);
+    }
+
+    @Get('report/analytics')
+    @Public()
+    @ApiOperation({ summary: 'Get participant report analytics' })
+    async getReportAnalytics(@Request() req: any, @Query('surveyId') surveyId: string) {
+        const email = this.validateToken(req);
+        await this.checkReportAccess(surveyId, email);
+        return this.userSurveysService.getParticipantReportAnalytics(surveyId, email);
+    }
+
+    @Get('report/participants')
+    @Public()
+    @ApiOperation({ summary: 'Get participant report respondents list' })
+    async getReportParticipants(@Request() req: any, @Query('surveyId') surveyId: string) {
+        const email = this.validateToken(req);
+        await this.checkReportAccess(surveyId, email);
+        return this.userSurveysService.getParticipantReportRespondents(surveyId, email);
     }
 }

@@ -48,17 +48,20 @@ export class SurveyParticipantsController {
     @Query('limit') limit = '10',
     @Query('search') search: string = '',
     @Query('status') status: string = 'all',
+    @Query('verificationStatus') verificationStatus: string = 'all',
     @Query('includeRejected') includeRejected: string = 'false',
     @Req() req: any,
   ) {
     const normalizedSearch = search?.trim() || undefined;
     const normalizedStatus = status && status !== 'all' ? status : undefined;
+    const normalizedVerificationStatus = verificationStatus && verificationStatus !== 'all' ? verificationStatus : undefined;
 
     const result = await this.participantsService.findAll(surveyId, this.buildAccessContext(req), {
       page: Number(page) || 1,
       limit: Number(limit) || 10,
       search: normalizedSearch,
       status: normalizedStatus,
+      verificationStatus: normalizedVerificationStatus,
       includeRejected: includeRejected === 'true',
     });
     return {
@@ -82,6 +85,7 @@ export class SurveyParticipantsController {
     @Body() dto: CreateSurveyParticipantDto,
     @Req() req: any,
   ) {
+    console.log(`[SurveyParticipantsController] Creating participant for survey ${surveyId}:`, JSON.stringify(dto));
     const participant = await this.participantsService.create(surveyId, dto, this.buildAccessContext(req));
     return {
       message: 'Participant created successfully',
@@ -98,6 +102,7 @@ export class SurveyParticipantsController {
     @Body() dto: UpdateSurveyParticipantDto,
     @Req() req: any,
   ) {
+    console.log(`[SurveyParticipantsController] Updating participant ${participantId} for survey ${surveyId}:`, JSON.stringify(dto));
     const participant = await this.participantsService.update(
       surveyId,
       participantId,

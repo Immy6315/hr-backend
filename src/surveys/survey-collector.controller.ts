@@ -56,7 +56,10 @@ export class SurveyCollectorController {
 
       // Find all participants by username (email)
       const participants = await this.participantModel.find({
-        username: body.username.toLowerCase().trim(),
+        $or: [
+          { username: body.username.toLowerCase().trim() },
+          { respondentEmail: body.username.toLowerCase().trim() }
+        ],
         isDeleted: false,
       });
 
@@ -117,15 +120,22 @@ export class SurveyCollectorController {
       )).filter(Boolean); // Remove nulls
 
       // Generate token identifying the user (email)
-      const token = Buffer.from(`user:${participant.username}:${Date.now()}`).toString('base64');
+      const pObj = participant.toObject ? participant.toObject() : participant;
+      const userIdentifier = pObj.username || pObj.respondentEmail || pObj.participantEmail || body.username;
+
+      this.logger.log(`Generating token for userIdentifier: ${userIdentifier}`);
+      this.logger.log(`Participant object keys: ${Object.keys(participant)}`);
+      this.logger.log(`Participant details: ${JSON.stringify(participant)}`);
+
+      const token = Buffer.from(`user:${userIdentifier}:${Date.now()}`).toString('base64');
 
       return {
         statusCode: 200,
         message: 'Login successful',
         data: {
           token,
-          username: participant.username,
-          participantName: participant.participantName,
+          username: userIdentifier,
+          participantName: participant.respondentName || participant.participantName,
           surveys,
         },
       };
@@ -207,32 +217,9 @@ export class SurveyCollectorController {
 
     const surveys = (await Promise.all(
       participants
-        // CRITICAL FIX: Only process records where user is the main participant
-        // Main participant = participantEmail matches AND (respondentEmail is same OR missing)
         .filter(p => {
-          const userEmailLower = username.toLowerCase();
-          const participantEmailMatch = p.participantEmail?.toLowerCase() === userEmailLower;
-          const respondentEmailMatch = p.respondentEmail?.toLowerCase() === userEmailLower;
-
-          // Main participant record has:
-          // 1. participantEmail = user's email
-          // 2. AND (respondentEmail = participantEmail for Self, OR respondentEmail missing/different)
-          const isSelfRecord = p.participantEmail?.toLowerCase() === p.respondentEmail?.toLowerCase();
-          const isMainParticipant = participantEmailMatch && (isSelfRecord || !p.respondentEmail);
-
-          // Nominee record has:
-          // - respondentEmail = user's email BUT participantEmail != user's email
-          const isNomineeRecord = respondentEmailMatch && !participantEmailMatch;
-
-          console.log(`🔍 Filtering ${p._id}:`, {
-            participantEmail: p.participantEmail,
-            respondentEmail: p.respondentEmail,
-            isMainParticipant,
-            isNomineeRecord,
-            include: isMainParticipant && !isNomineeRecord
-          });
-
-          return isMainParticipant && !isNomineeRecord;
+          // Allow both main participants and nominees/respondents
+          return true;
         })
         .map(async (p) => {
           try {
@@ -265,6 +252,44 @@ export class SurveyCollectorController {
               return null;
             }
 
+            // Calculate response counts for report visibility
+            let responseCounts = undefined;
+            if (survey.nominationConfig?.participantReportConfig?.isEnabled) {
+              const subjectEmail = p.participantEmail; // Current user is the subject
+              console.log(`📊 Calculating report for subject: ${subjectEmail}`);
+              console.log(`⚙️ Report Config:`, JSON.stringify(survey.nominationConfig.participantReportConfig));
+
+              if (subjectEmail) {
+                const completedRespondents = await this.participantModel.find({
+                  surveyId: p.surveyId,
+                  participantEmail: subjectEmail,
+                  completionStatus: 'Completed',
+                  isDeleted: false
+                });
+
+                const byRelationship: Record<string, number> = {};
+                completedRespondents.forEach(r => {
+                  const rel = r.relationship || 'Unknown';
+                  byRelationship[rel] = (byRelationship[rel] || 0) + 1;
+                });
+
+                responseCounts = {
+                  total: completedRespondents.length,
+                  byRelationship
+                };
+                console.log(`📈 Calculated Counts:`, JSON.stringify(responseCounts));
+              } else {
+                console.log(`⚠️ No subjectEmail found for participant ${p._id}`);
+              }
+            } else {
+              console.log(`ℹ️ Report disabled for survey ${survey.name}`);
+            }
+
+            const nominationConfig = survey.nominationConfig || { isOpen: false };
+            if (responseCounts) {
+              nominationConfig.responseCounts = responseCounts;
+            }
+
             console.log(`✅ Survey included: ${survey.name}`);
             return {
               surveyId: p.surveyId.toString(),
@@ -277,7 +302,7 @@ export class SurveyCollectorController {
               completionStatus: p.completionStatus,
               isLocked: p.isLocked,
               completedAt: p.surveyCompletedAt,
-              nominationConfig: survey.nominationConfig || { isOpen: false }, // Always include nominationConfig
+              nominationConfig, // Include config with counts
               nominationStatus: p.nominationStatus,
             };
           } catch (e) {

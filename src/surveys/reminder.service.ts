@@ -29,6 +29,7 @@ export class ReminderService {
                 isDeleted: false,
                 isLocked: false,
                 completionStatus: { $nin: ['Completed', 'completed'] },
+                verificationStatus: 'verified',
             })
             .sort({ _id: -1 })
             .exec();
@@ -93,14 +94,16 @@ export class ReminderService {
                     isInvite = true;
                 } else {
                     // Respondent
+                    // Always generate new credentials and send as an invite (with password)
+                    // This ensures users always have a working password when reminded
+                    isInvite = true;
+
                     if (participant.remindersSent && participant.remindersSent > 0) {
-                        // Already sent at least once -> Send Reminder
+                        // Already sent -> Use Reminder template
                         template = survey.communicationTemplates?.respondentReminder;
-                        isInvite = false;
                     } else {
-                        // Never sent -> Send Invite (First time)
+                        // First time -> Use Invite template
                         template = survey.communicationTemplates?.respondentInvite;
-                        isInvite = true;
                     }
                 }
 
