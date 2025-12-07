@@ -547,13 +547,14 @@ export class UserSurveyResponsesService {
         targetHash = hashIndex; // Use index-based for query if that's what matched, or we might need both?
 
         // Determine questionIdForRowCol for Matrix Row Hash Generation
+        // Determine questionIdForRowCol for Matrix Row Hash Generation
         // This MUST match getSurveyAnalytics logic
-        if (q.questionId) {
-          questionIdForRowCol = q.questionId;
-        } else if (q.uniqueOrder !== undefined) {
-          questionIdForRowCol = hashUnique;
+        const isRandomId = !q.questionId || (typeof q.questionId === 'string' && q.questionId.length === 32 && /^[0-9a-f]+$/i.test(q.questionId));
+
+        if (isRandomId || !q.questionId) {
+          questionIdForRowCol = hashUnique || hashIndex;
         } else {
-          questionIdForRowCol = hashIndex;
+          questionIdForRowCol = q.questionId;
         }
       }
     });
@@ -564,15 +565,88 @@ export class UserSurveyResponsesService {
       // If not found, we might still proceed if we want to dump raw responses for that ID
     }
 
-    // Query responses using both the input ID and the calculated Hash
-    const queryIds = [questionId];
-    if (targetHash && targetHash !== questionId) queryIds.push(targetHash);
-
-    const responses = await this.responseModel.find({
+    // --- NEW MATCHING LOGIC START ---
+    // Fetch ALL responses for the survey to perform sequential matching
+    const allResponses = await this.responseModel.find({
       surveyId: new Types.ObjectId(surveyId),
-      questionId: { $in: queryIds },
       isDeleted: false,
-    }).populate('userSurveyId').exec();
+    }).sort({ createdAt: 1 }).populate('userSurveyId').exec();
+
+    const surveyQuestions: any[] = [];
+    (survey.pages || []).forEach((page: any) => {
+      (page.questions || []).forEach((q: any) => {
+        if (!q.isDeleted) {
+          surveyQuestions.push({ ...q, pageId: page.id });
+        }
+      });
+    });
+
+    const answersByQuestionId = new Map<string, any[]>();
+    const answersByUserSurvey = new Map<string, any[]>();
+
+    allResponses.forEach(a => {
+      const key = String(a.userSurveyId && (a.userSurveyId as any)._id ? (a.userSurveyId as any)._id : a.userSurveyId);
+      if (!answersByUserSurvey.has(key)) answersByUserSurvey.set(key, []);
+      answersByUserSurvey.get(key).push(a);
+    });
+
+    answersByUserSurvey.forEach((userAnswers, usId) => {
+      const matchedAnswers = new Set<string>();
+      const matchedQuestions = new Set<string>();
+
+      // Pass 1: Strong Matches
+      userAnswers.forEach(a => {
+        let matchedQ: any = null;
+        matchedQ = surveyQuestions.find(q => String(q.questionId || q.id || q._id) === String(a.questionId));
+
+        if (!matchedQ && a.questionText && a.questionText !== 'Unknown Question') {
+          matchedQ = surveyQuestions.find(q => q.text && q.text.trim().toLowerCase() === a.questionText.trim().toLowerCase());
+        }
+
+        if (!matchedQ && a.pageIndex !== undefined && a.questionOrder !== undefined) {
+          matchedQ = surveyQuestions.find(q => {
+            const pIndex = (survey.pages || []).findIndex((p: any) => String(p.id || p._id) === String(q.pageId));
+            return pIndex === a.pageIndex && Number(q.uniqueOrder) === a.questionOrder;
+          });
+        }
+
+        if (matchedQ) {
+          const qKey = String(matchedQ.questionId || matchedQ.id || matchedQ._id);
+          if (!answersByQuestionId.has(qKey)) answersByQuestionId.set(qKey, []);
+          answersByQuestionId.get(qKey).push(a);
+          matchedAnswers.add(String(a._id));
+          matchedQuestions.add(qKey);
+        }
+      });
+
+      // Pass 2: Sequential Type Matching
+      const unmatchedAnswers = userAnswers.filter(a => !matchedAnswers.has(String(a._id)));
+      if (unmatchedAnswers.length > 0) {
+        surveyQuestions.forEach(q => {
+          const qKey = String(q.questionId || q.id || q._id);
+          if (!matchedQuestions.has(qKey)) {
+            const candidateIdx = unmatchedAnswers.findIndex(a =>
+              a.questionType === q.type ||
+              (a.questionType === 'matrix_radio' && q.type === 'MATRIX_RADIO_BOX') ||
+              (a.questionType === 'matrix_checkbox' && q.type === 'MATRIX_CHECK_BOX') ||
+              (a.questionType === 'radio' && q.type === 'RADIO_BOX') ||
+              (a.questionType === 'checkbox' && q.type === 'CHECK_BOX')
+            );
+
+            if (candidateIdx !== -1) {
+              const a = unmatchedAnswers[candidateIdx];
+              if (!answersByQuestionId.has(qKey)) answersByQuestionId.set(qKey, []);
+              answersByQuestionId.get(qKey).push(a);
+              unmatchedAnswers.splice(candidateIdx, 1);
+            }
+          }
+        });
+      }
+    });
+
+    // Filter responses for the requested question
+    const responses = answersByQuestionId.get(questionId) || [];
+    // --- NEW MATCHING LOGIC END ---
 
     // Manually fetch users to handle mixed types in userId (ObjectId vs Email)
     const userIdsToFetch = new Set<string>();
@@ -606,6 +680,15 @@ export class UserSurveyResponsesService {
 
       // --- MATRIX QUESTIONS ---
       if (['matrix_radio', 'matrix_checkbox', 'MATRIX_RADIO_BOX', 'MATRIX_CHECK_BOX'].includes(qType)) {
+
+        // Ensure rows/columns are populated from gridRows/gridColumns (Deep Copy)
+        if ((!targetQuestion.rows || targetQuestion.rows.length === 0) && targetQuestion.gridRows && targetQuestion.gridRows.length > 0) {
+          try { targetQuestion.rows = JSON.parse(JSON.stringify(targetQuestion.gridRows)); } catch (e) { }
+        }
+        if ((!targetQuestion.columns || targetQuestion.columns.length === 0) && targetQuestion.gridColumns && targetQuestion.gridColumns.length > 0) {
+          try { targetQuestion.columns = JSON.parse(JSON.stringify(targetQuestion.gridColumns)); } catch (e) { }
+        }
+
         // Build Maps
         const rows = targetQuestion.rows || targetQuestion.gridRows || [];
         const columns = targetQuestion.columns || targetQuestion.gridColumns || [];
@@ -613,16 +696,26 @@ export class UserSurveyResponsesService {
         if (rows) {
           rows.forEach((row: any, idx: number) => {
             const rowText = row.text || row.label || `Statement ${idx + 1}`;
+            // Use robust hash generation matching UserSurveysService
             const rowId = row.id || crypto.createHash('md5').update(`${questionIdForRowCol}-row-${idx}-${rowText}`).digest('hex');
             rowMap.set(rowId, rowText);
+            // Also map by direct ID if available
+            if (row.id) rowMap.set(row.id, rowText);
           });
         }
         if (columns) {
           columns.forEach((col: any, idx: number) => {
             const colText = col.text || col.label || `Option ${idx + 1}`;
+            // Use robust hash generation matching UserSurveysService
             const colId = col.id || crypto.createHash('md5').update(`${questionIdForRowCol}-column-${idx}-${colText}`).digest('hex');
             colMap.set(colId, colText);
-            if (col.weight !== undefined) colWeightMap.set(colId, Number(col.weight));
+            // Also map by direct ID
+            if (col.id) colMap.set(col.id, colText);
+
+            if (col.weight !== undefined) {
+              colWeightMap.set(colId, Number(col.weight));
+              if (col.id) colWeightMap.set(col.id, Number(col.weight));
+            }
           });
         }
 
@@ -1526,7 +1619,48 @@ export class UserSurveyResponsesService {
             }));
           }
         }
+
+        // Fallback: Check for orphaned columns
+        if (question.columns) {
+          const validColIds = new Set(question.columns.map((c: any) => String(c.id || c._id)));
+          question.columns.forEach((c: any) => {
+            if (c.uniqueOrder) validColIds.add(String(c.uniqueOrder));
+            if (c.value) validColIds.add(String(c.value));
+          });
+
+          const orphanedColIds = new Set<string>();
+          questionAnswers.forEach(r => {
+            const val = r.response;
+            if (Array.isArray(val)) {
+              val.forEach((v: any) => {
+                const cId = String(v.columnId || v.value);
+                if (cId && !validColIds.has(cId)) orphanedColIds.add(cId);
+              });
+            } else if (typeof val === 'object' && val !== null) {
+              if (val.columnId) {
+                const cId = String(val.columnId);
+                if (cId && !validColIds.has(cId)) orphanedColIds.add(cId);
+              } else {
+                Object.values(val).forEach((v: any) => {
+                  const cId = String(v);
+                  if (cId && !validColIds.has(cId)) orphanedColIds.add(cId);
+                });
+              }
+            }
+          });
+
+          if (orphanedColIds.size > 0) {
+            const recoveredCols = Array.from(orphanedColIds).map((cId, idx) => ({
+              id: cId,
+              text: `Recovered Option ${idx + 1}`,
+              value: cId,
+              uniqueOrder: question.columns.length + idx
+            }));
+            question.columns = [...question.columns, ...recoveredCols];
+          }
+        }
       }
+      // --- ROW RECONSTRUCTION FALLBACK END ---
       // --- CHOICE QUESTIONS ---
       else if (['radio', 'checkbox', 'dropdown', 'RADIO_BOX', 'CHECK_BOX', 'DROPDOWN'].includes(qType)) {
         const counts: Record<string, number> = {};
@@ -1714,20 +1848,57 @@ export class UserSurveyResponsesService {
 
     allUserSurveys.forEach(us => {
       let assignment: any = us.surveyParticipantId;
+      // DEBUG: Log raw assignment
+      // console.log(`[PDF_DEBUG] US ${us._id} Raw Assignment:`, assignment);
 
       if (!assignment) {
         const uid = String(us.userId);
         const userEmail = userMap.get(uid) || uid;
 
-        assignment = allAssignments.find(a =>
-          (a.respondentEmail || '').toLowerCase() === userEmail.toLowerCase()
-        );
+        // DEBUG: Trace matching
+        console.log(`[PDF_TRACE] US ${us._id} User: ${userEmail} UID: ${uid}`);
+
+        assignment = allAssignments.find(a => {
+          // Strict check: don't match empty to empty
+          const rEmail = (a.respondentEmail || '').toLowerCase();
+          const uEmail = userEmail.toLowerCase();
+          if (!rEmail || !uEmail) return false;
+          return rEmail === uEmail;
+        });
+
+        // Try matching by UserID if email failed and assignment has userId
+        if (!assignment) {
+          assignment = allAssignments.find(a => {
+            const matchUID = String((a as any).userId) === uid;
+            const matchSPID = String(a._id) === String(us.surveyParticipantId);
+            console.log(`[PDF_TRACE-Fallback] Check Assign ${a._id}: UID ${String((a as any).userId)} vs ${uid} (${matchUID}) | SPID ${a._id} vs ${us.surveyParticipantId} (${matchSPID})`);
+            return matchUID || matchSPID;
+          });
+        }
       }
 
-      if (assignment && assignment.participantEmail && assignment.participantEmail.toLowerCase() === participantEmail.toLowerCase()) {
-        targetResponses.push(us);
+      if (assignment) {
+        const pEmail = (assignment.participantEmail || '').toLowerCase();
+        const pName = (assignment.participantName || '').toLowerCase();
+        const target = participantEmail.toLowerCase();
+
+        console.log(`[PDF_TRACE] Match? Assign: ${pName}/${pEmail} vs Target: ${target}`);
+
+        if ((pEmail && pEmail === target) || (pName && pName === target)) {
+          targetResponses.push(us);
+        }
+      } else {
+        console.log(`[PDF_TRACE] No Assignment for US ${us._id}`);
       }
     });
+
+    console.log(`[PDF Info] Generating PDF for: "${participantEmail}" - Found ${targetResponses.length} responses`);
+
+    // Log available assignments for context if 0 found
+    if (targetResponses.length === 0) {
+      // Keep minimal warn log for production/debugging if needed, or remove completely.
+      console.warn(`[PDF Warning] No responses found for participant identifier: ${participantEmail}`);
+    }
 
     const responseIds = targetResponses.map(r => r._id);
     const allAnswers = await this.responseModel.find({
@@ -1792,31 +1963,67 @@ export class UserSurveyResponsesService {
         const colMap = new Map<string, string>();
         const colWeightMap = new Map<string, number>();
 
+        // Ensure rows/columns are populated from gridRows/gridColumns (Deep Copy)
+        if ((!question.rows || question.rows.length === 0) && question.gridRows && question.gridRows.length > 0) {
+          try { question.rows = JSON.parse(JSON.stringify(question.gridRows)); } catch (e) { }
+        }
+        if ((!question.columns || question.columns.length === 0) && question.gridColumns && question.gridColumns.length > 0) {
+          try { question.columns = JSON.parse(JSON.stringify(question.gridColumns)); } catch (e) { }
+        }
+
         const rows = question.rows || question.gridRows || [];
         const columns = question.columns || question.gridColumns || [];
 
         // Determine questionIdForRowCol for Matrix Row Hash Generation
         let questionIdForRowCol = question.questionId;
-        if (!questionIdForRowCol && question.uniqueOrder !== undefined) {
-          questionIdForRowCol = crypto.createHash('md5')
-            .update(`${question.pageId?.toString() || ''}-${question.uniqueOrder}-${question.text}-${question.type}`)
-            .digest('hex');
+        const isRandomId = !question.questionId || (typeof question.questionId === 'string' && question.questionId.length === 32 && /^[0-9a-f]+$/i.test(question.questionId));
+
+        if (isRandomId || !question.questionId) {
+          // Use hashIndex or hashUnique calculated earlier
+          // Logic mirrors UserSurveysService
+          if (question.uniqueOrder !== undefined) {
+            questionIdForRowCol = hashUnique;
+          } else {
+            questionIdForRowCol = hashIndex;
+          }
+        }
+
+        // DEBUG: Matrix ID Matching
+        if (rows && rows.length > 0) {
+          console.log(`[PDF_DEBUG] Q: "${question.text}" | QID_RowCol: ${questionIdForRowCol}`);
+          console.log(`[PDF_DEBUG] hashIndex: ${hashIndex}, hashUnique: ${hashUnique}`);
         }
 
         if (rows) {
           rows.forEach((row: any, idx: number) => {
             const rowText = row.text || row.label || `Statement ${idx + 1}`;
+            // Use robust hash generation matching UserSurveysService
             const rowId = row.id || crypto.createHash('md5').update(`${questionIdForRowCol}-row-${idx}-${rowText}`).digest('hex');
             rowMap.set(rowId, rowText);
+            if (row.id) rowMap.set(row.id, rowText);
+            // console.log(`[PDF_DEBUG] Row Map: ${rowId} -> ${rowText}`);
           });
         }
         if (columns) {
           columns.forEach((col: any, idx: number) => {
             const colText = col.text || col.label || `Option ${idx + 1}`;
+            // Use robust hash generation matching UserSurveysService
             const colId = col.id || crypto.createHash('md5').update(`${questionIdForRowCol}-column-${idx}-${colText}`).digest('hex');
             colMap.set(colId, colText);
+            if (col.id) colMap.set(col.id, colText);
             if (col.weight !== undefined) colWeightMap.set(colId, Number(col.weight));
+            // console.log(`[PDF_DEBUG] Col Map: ${colId} -> ${colText}`);
           });
+        }
+
+        // Log first answer to check IDs
+        if (questionAnswers.length > 0) {
+          const firstAns = questionAnswers[0];
+          const respArr = Array.isArray(firstAns.response) ? firstAns.response : [firstAns.response];
+          if (respArr.length > 0 && typeof respArr[0] === 'object') {
+            console.log(`[PDF_DEBUG] First Answer: rowId=${respArr[0].rowId}, colId=${respArr[0].columnId}`);
+            console.log(`[PDF_DEBUG] RowMatch? ${rowMap.has(respArr[0].rowId)}, ColMatch? ${colMap.has(respArr[0].columnId)}`);
+          }
         }
 
         if (rows && columns) {
@@ -2078,29 +2285,66 @@ export class UserSurveyResponsesService {
       const colMap = new Map<string, string>();
       const colWeightMap = new Map<string, number>();
 
+      // Ensure rows/columns are populated from gridRows/gridColumns (Deep Copy)
+      if ((!targetQuestion.rows || targetQuestion.rows.length === 0) && targetQuestion.gridRows && targetQuestion.gridRows.length > 0) {
+        try { targetQuestion.rows = JSON.parse(JSON.stringify(targetQuestion.gridRows)); } catch (e) { }
+      }
+      if ((!targetQuestion.columns || targetQuestion.columns.length === 0) && targetQuestion.gridColumns && targetQuestion.gridColumns.length > 0) {
+        try { targetQuestion.columns = JSON.parse(JSON.stringify(targetQuestion.gridColumns)); } catch (e) { }
+      }
+
       const rows = targetQuestion.rows || targetQuestion.gridRows || [];
       const columns = targetQuestion.columns || targetQuestion.gridColumns || [];
 
       // Determine questionIdForRowCol for Matrix Row Hash Generation
       let questionIdForRowCol = targetQuestion.questionId;
-      if (!questionIdForRowCol && targetQuestion.uniqueOrder !== undefined) {
-        questionIdForRowCol = crypto.createHash('md5')
-          .update(`${targetQuestion.pageId?.toString() || ''}-${targetQuestion.uniqueOrder}-${targetQuestion.text}-${targetQuestion.type}`)
-          .digest('hex');
+      const isRandomId = !targetQuestion.questionId || (typeof targetQuestion.questionId === 'string' && targetQuestion.questionId.length === 32 && /^[0-9a-f]+$/i.test(targetQuestion.questionId));
+
+      if (isRandomId || !targetQuestion.questionId) {
+        // Re-calculate hash based on robust properties if needed, or use targetHash calculated earlier
+        if (targetHash) {
+          questionIdForRowCol = targetHash;
+        } else {
+          // Fallback calculation if targetHash wasn't preserved (though it should be)
+          const crypto = require('crypto');
+          questionIdForRowCol = crypto.createHash('md5')
+            .update(`${targetQuestion.pageId?.toString() || ''}-${targetQuestion.uniqueOrder !== undefined ? targetQuestion.uniqueOrder : ''}-${targetQuestion.text}-${targetQuestion.type}`) // Simplified fallback
+            .digest('hex');
+          // Actually, we should just rely on what we matched with:
+          // We don't have easy access to 'index' here unless we pass it.
+          // But valid matches usually hit hashIndex or hashUnique.
+          // If we found the question, we used one of them.
+          // Let's use targetHash from the finding loop.
+          questionIdForRowCol = targetHash;
+          // Note: targetHash in finding loop was set to hashIndex. 
+          // If we matched by hashUnique, we might want that.
+          // But for now let's trust targetHash is the stable index hash which is the default fallback.
+        }
+        // Better approach: Re-implement the robust choice
+        if (targetQuestion.uniqueOrder !== undefined) {
+          const crypto = require('crypto');
+          questionIdForRowCol = crypto.createHash('md5')
+            .update(`${targetQuestion.pageId?.toString() || ''}-${targetQuestion.uniqueOrder}-${targetQuestion.text}-${targetQuestion.type}`)
+            .digest('hex');
+        }
       }
 
       if (rows) {
         rows.forEach((row: any, idx: number) => {
           const rowText = row.text || row.label || `Statement ${idx + 1}`;
+          // Use robust hash generation matching UserSurveysService
           const rowId = row.id || crypto.createHash('md5').update(`${questionIdForRowCol}-row-${idx}-${rowText}`).digest('hex');
           rowMap.set(rowId, rowText);
+          if (row.id) rowMap.set(row.id, rowText);
         });
       }
       if (columns) {
         columns.forEach((col: any, idx: number) => {
           const colText = col.text || col.label || `Option ${idx + 1}`;
+          // Use robust hash generation matching UserSurveysService
           const colId = col.id || crypto.createHash('md5').update(`${questionIdForRowCol}-column-${idx}-${colText}`).digest('hex');
           colMap.set(colId, colText);
+          if (col.id) colMap.set(col.id, colText);
           if (col.weight !== undefined) colWeightMap.set(colId, Number(col.weight));
         });
       }

@@ -451,20 +451,44 @@ export class UserSurveysService {
     }).exec();
 
     const nomineeIds = nominees.map(n => n._id);
+    const nomineeEmails = nominees.map(n => n.respondentEmail).filter(Boolean);
 
-    // 2. Count completed surveys linked to these nominees
+    // 2. Count completed surveys linked to these nominees (by ID or Email)
     const responses = await this.userSurveyModel.find({
       surveyId: new Types.ObjectId(surveyId),
-      surveyParticipantId: { $in: nomineeIds },
+      $or: [
+        { surveyParticipantId: { $in: nomineeIds } },
+        { userId: { $in: nomineeEmails } }
+      ],
       status: UserSurveyStatus.COMPLETED,
       isDeleted: false
     }).populate('surveyParticipantId').exec();
 
     const byRelationship: Record<string, number> = {};
+
+    // Create lookup maps
+    const nomineeMapById = new Map(nominees.map(n => [n._id.toString(), n]));
+    const nomineeMapByEmail = new Map(nominees.map(n => [n.respondentEmail.toLowerCase(), n]));
+
     responses.forEach(r => {
-      const p = r.surveyParticipantId as any; // Populated
+      let relationship = '';
+
+      // Try to get relationship from populated field
+      const p = r.surveyParticipantId as any;
       if (p && p.relationship) {
-        byRelationship[p.relationship] = (byRelationship[p.relationship] || 0) + 1;
+        relationship = p.relationship;
+      }
+      // Fallback: try to match by ID
+      else if (r.surveyParticipantId && nomineeMapById.has(r.surveyParticipantId.toString())) {
+        relationship = nomineeMapById.get(r.surveyParticipantId.toString()).relationship;
+      }
+      // Fallback: try to match by Email (userId)
+      else if (r.userId && nomineeMapByEmail.has(r.userId.toLowerCase())) {
+        relationship = nomineeMapByEmail.get(r.userId.toLowerCase()).relationship;
+      }
+
+      if (relationship) {
+        byRelationship[relationship] = (byRelationship[relationship] || 0) + 1;
       }
     });
 
@@ -484,10 +508,14 @@ export class UserSurveysService {
       isDeleted: false
     }).exec();
     const nomineeIds = nominees.map(n => n._id);
+    const nomineeEmails = nominees.map(n => n.respondentEmail).filter(Boolean);
 
     const responses = await this.userSurveyModel.find({
       surveyId: new Types.ObjectId(surveyId),
-      surveyParticipantId: { $in: nomineeIds },
+      $or: [
+        { surveyParticipantId: { $in: nomineeIds } },
+        { userId: { $in: nomineeEmails } }
+      ],
       status: UserSurveyStatus.COMPLETED,
       isDeleted: false
     }).sort({ completedAt: 1 }).exec();
@@ -520,17 +548,30 @@ export class UserSurveysService {
       isDeleted: false
     }).exec();
 
+
+
     const nomineeIds = nominees.map(n => n._id);
+    const nomineeEmails = nominees.map(n => n.respondentEmail).filter(Boolean);
+
     const responses = await this.userSurveyModel.find({
       surveyId: new Types.ObjectId(surveyId),
-      surveyParticipantId: { $in: nomineeIds },
+      $or: [
+        { surveyParticipantId: { $in: nomineeIds } },
+        { userId: { $in: nomineeEmails } }
+      ],
       isDeleted: false
     }).exec();
 
-    const responseMap = new Map(responses.map(r => [r.surveyParticipantId?.toString(), r]));
+    // Create maps for quick lookup
+    const responseMapById = new Map(responses.map(r => [r.surveyParticipantId?.toString(), r]));
+    const responseMapByEmail = new Map(responses.map(r => [r.userId?.toLowerCase(), r]));
 
     return nominees.map(n => {
-      const response = responseMap.get(n._id.toString()) as any;
+      // Try to find response by ID first, then by Email
+      let response = responseMapById.get(n._id.toString()) as any;
+      if (!response && n.respondentEmail) {
+        response = responseMapByEmail.get(n.respondentEmail.toLowerCase());
+      }
       return {
         id: n._id,
         name: n.respondentName,
@@ -551,10 +592,14 @@ export class UserSurveysService {
       isDeleted: false
     }).exec();
     const nomineeIds = nominees.map(n => n._id);
+    const nomineeEmails = nominees.map(n => n.respondentEmail).filter(Boolean);
 
     const responses = await this.userSurveyModel.find({
       surveyId: new Types.ObjectId(surveyId),
-      surveyParticipantId: { $in: nomineeIds },
+      $or: [
+        { surveyParticipantId: { $in: nomineeIds } },
+        { userId: { $in: nomineeEmails } }
+      ],
       status: UserSurveyStatus.COMPLETED,
       isDeleted: false
     }).exec();
@@ -569,7 +614,7 @@ export class UserSurveysService {
     const allAnswers = await this.responseModel.find({
       userSurveyId: { $in: userSurveyIds },
       isDeleted: false
-    }).exec();
+    }).sort({ createdAt: 1 }).exec(); // Sort by creation time for sequential matching
 
     // 3. Get Survey Structure (Questions)
     const survey = await this.surveysService.findOne(surveyId);
@@ -578,20 +623,114 @@ export class UserSurveysService {
     (survey.pages || []).forEach((page: any) => {
       (page.questions || []).forEach((q: any) => {
         if (!q.isDeleted) {
-          questions.push({ ...q, pageId: page.id });
+          // Ensure we work with a plain object to avoid Mongoose property access issues
+          const qObj = typeof q.toObject === 'function' ? q.toObject() : JSON.parse(JSON.stringify(q));
+
+          // CRITICAL: Ensure rows/columns are populated from gridRows/gridColumns/row immediately
+          // SurveysService.formatQuestionForResponse returns 'row' (singular), so we must check that too.
+          if (!qObj.rows || qObj.rows.length === 0) {
+            if (qObj.row && qObj.row.length > 0) {
+              qObj.rows = qObj.row;
+            } else if (qObj.gridRows && qObj.gridRows.length > 0) {
+              qObj.rows = qObj.gridRows;
+            }
+          }
+
+          if ((!qObj.columns || qObj.columns.length === 0) && qObj.gridColumns && qObj.gridColumns.length > 0) {
+            qObj.columns = qObj.gridColumns;
+          }
+
+          questions.push({ ...qObj, pageId: page.id || page._id });
         }
       });
     });
 
-    // 4. Aggregate Data
-    return questions.map(question => {
-      const qType = question.type;
+    // --- PRE-PROCESSING: Map Answers to Questions ---
+    // We need to handle unmatched answers by mapping them sequentially based on type
+    const answersByQuestionId = new Map<string, any[]>();
 
-      // Filter answers for this question
-      const questionAnswers = allAnswers.filter(a =>
-        String(a.questionId) === String(question.questionId) ||
-        String(a.questionId) === String(question.id)
-      );
+    // Group answers by UserSurvey to process each participant's session individually
+    const answersByUserSurvey = new Map<string, any[]>();
+    allAnswers.forEach(a => {
+      const key = a.userSurveyId.toString();
+      if (!answersByUserSurvey.has(key)) answersByUserSurvey.set(key, []);
+      answersByUserSurvey.get(key).push(a);
+    });
+
+    answersByUserSurvey.forEach((userAnswers, usId) => {
+      const matchedAnswers = new Set<string>(); // Keep track of matched answer IDs
+      const matchedQuestions = new Set<string>(); // Keep track of questions answered by this user
+
+      // Pass 1: Strong Matches (ID, Text, Order)
+      userAnswers.forEach(a => {
+        let matchedQ: any = null;
+
+        // 1. Direct ID Match
+        matchedQ = questions.find(q => String(q.questionId || q.id || q._id) === String(a.questionId));
+
+        // 2. Text Match
+        if (!matchedQ && a.questionText && a.questionText !== 'Unknown Question') {
+          matchedQ = questions.find(q => q.text && q.text.trim().toLowerCase() === a.questionText.trim().toLowerCase());
+        }
+
+        // 3. Order Match
+        if (!matchedQ && a.pageIndex !== undefined && a.questionOrder !== undefined) {
+          matchedQ = questions.find(q => {
+            const pIndex = (survey.pages || []).findIndex((p: any) => String(p.id || p._id) === String(q.pageId));
+            return pIndex === a.pageIndex && Number(q.uniqueOrder) === a.questionOrder;
+          });
+        }
+
+        if (matchedQ) {
+          const qKey = String(matchedQ.questionId || matchedQ.id || matchedQ._id);
+          if (!answersByQuestionId.has(qKey)) answersByQuestionId.set(qKey, []);
+          answersByQuestionId.get(qKey).push(a);
+
+          matchedAnswers.add(String(a._id));
+          matchedQuestions.add(qKey);
+        }
+      });
+
+      // Pass 2: Sequential Type Matching for Unmatched Answers
+      const unmatchedAnswers = userAnswers.filter(a => !matchedAnswers.has(String(a._id)));
+
+      if (unmatchedAnswers.length > 0) {
+        // Iterate through questions in order
+        questions.forEach(q => {
+          const qKey = String(q.questionId || q.id || q._id);
+
+          // If this question wasn't matched in Pass 1 for this user
+          if (!matchedQuestions.has(qKey)) {
+            // Find the first unmatched answer with the same type
+            const candidateIdx = unmatchedAnswers.findIndex(a =>
+              a.questionType === q.type ||
+              (a.questionType === 'matrix_radio' && q.type === 'MATRIX_RADIO_BOX') ||
+              (a.questionType === 'matrix_checkbox' && q.type === 'MATRIX_CHECK_BOX') ||
+              (a.questionType === 'radio' && q.type === 'RADIO_BOX') ||
+              (a.questionType === 'checkbox' && q.type === 'CHECK_BOX')
+            );
+
+            if (candidateIdx !== -1) {
+              const a = unmatchedAnswers[candidateIdx];
+              // Link it!
+              if (!answersByQuestionId.has(qKey)) answersByQuestionId.set(qKey, []);
+              answersByQuestionId.get(qKey).push(a);
+
+              // Remove from unmatched list so it's not reused
+              unmatchedAnswers.splice(candidateIdx, 1);
+            }
+          }
+        });
+      }
+    });
+
+    // 4. Aggregate Data
+    return questions.map((question, index) => {
+      const qType = question.type;
+      const qKey = String(question.questionId || question.id || question._id);
+
+      // Get mapped answers
+      const questionAnswers = answersByQuestionId.get(qKey) || [];
 
       const answeredCount = questionAnswers.length;
 
@@ -599,7 +738,7 @@ export class UserSurveysService {
       let chartData: any[] = [];
       let textResponses: string[] = [];
 
-      if (['single_choice', 'multiple_choice', 'dropdown', 'rating', 'nps', 'opinion_scale'].includes(qType)) {
+      if (['single_choice', 'multiple_choice', 'dropdown', 'rating', 'nps', 'opinion_scale', 'RADIO_BOX', 'CHECK_BOX', 'DROPDOWN'].includes(qType)) {
         const counts: Record<string, number> = {};
         questionAnswers.forEach(a => {
           const values = Array.isArray(a.response) ? a.response : [a.response];
@@ -617,50 +756,196 @@ export class UserSurveysService {
         } else {
           chartData = Object.entries(counts).map(([name, value]) => ({ name, value }));
         }
-      } else if (['short_text', 'long_text'].includes(qType)) {
+      } else if (['short_text', 'long_text', 'LONG_ANSWER', 'SHORT_ANSWER'].includes(qType)) {
         textResponses = questionAnswers.map(a => String(a.response)).filter(Boolean);
       } else if (['matrix_radio', 'matrix_checkbox', 'MATRIX_RADIO_BOX', 'MATRIX_CHECK_BOX'].includes(qType)) {
         // Handle Matrix
+        const crypto = require('crypto');
+
+        // Determine questionIdForRowCol for Matrix Row Hash Generation
+        let questionIdForRowCol = question.questionId;
+
+        // Fix for SurveysService returning random ephemeral questionIds:
+        // If the questionId is missing or created by randomBytes (32 chars hex), prefer the stable MD5 hash.
+        const isRandomId = !question.questionId || (typeof question.questionId === 'string' && question.questionId.length === 32 && /^[0-9a-f]+$/i.test(question.questionId));
+
+        // Generate stable hash based on pageId, uniqueOrder, text, type.
+        // NOTE: We use 'index' from the map loop as a fallback if uniqueOrder is missing,
+        // mirroring the Admin logic 'hashIndex'.
+        const hashIndexInput = `${question.pageId?.toString() || ''}-${index}-${question.text}-${question.type}`;
+        const hashIndex = crypto.createHash('md5')
+          .update(hashIndexInput)
+          .digest('hex');
+
+        let hashUnique: string | null = null;
+        if (question.uniqueOrder !== undefined) {
+          hashUnique = crypto.createHash('md5')
+            .update(`${question.pageId?.toString() || ''}-${question.uniqueOrder}-${question.text}-${question.type}`)
+            .digest('hex');
+        }
+
+        // Prefer hashUnique if available (most stable, often from survey-collector)
+        // Otherwise, use hashIndex if question.questionId is random or missing
+        if (isRandomId || !questionIdForRowCol) {
+          questionIdForRowCol = hashUnique || hashIndex;
+        }
+
+        // CRITICAL FIX: Update the question's ID to be the stable hash so the frontend uses it.
+        // This ensures export/analytics calls use the consistent ID.
+        question.questionId = questionIdForRowCol;
+        question.id = questionIdForRowCol; // Also update alias just in case
+
+
+        // Ensure we use gridRows if rows is missing (common alias in our DB)
+        if ((!question.rows || question.rows.length === 0) && question.gridRows && question.gridRows.length > 0) {
+          try {
+            question.rows = JSON.parse(JSON.stringify(question.gridRows));
+          } catch (e) {
+            console.error('Error copying gridRows to rows', e);
+            question.rows = question.gridRows;
+          }
+        }
+
+        if ((!question.columns || question.columns.length === 0) && question.gridColumns && question.gridColumns.length > 0) {
+          try {
+            question.columns = JSON.parse(JSON.stringify(question.gridColumns));
+          } catch (e) {
+            console.error('Error copying gridColumns to columns', e);
+            question.columns = question.gridColumns;
+          }
+        }
+
+
+        // Fallback: If rows are missing in survey definition, reconstruct them from responses
+        if ((!question.rows || question.rows.length === 0) && answeredCount > 0) {
+          const rowIds = new Set<string>();
+          questionAnswers.forEach(a => {
+            const val = a.response;
+            if (Array.isArray(val)) {
+              val.forEach((v: any) => { if (v && v.rowId) rowIds.add(String(v.rowId)); });
+            } else if (typeof val === 'object' && val !== null) {
+              if (val.rowId) rowIds.add(String(val.rowId));
+              else {
+                // Map format { rowId: colId }
+                Object.keys(val).forEach(k => rowIds.add(k));
+              }
+            }
+          });
+          if (rowIds.size > 0) {
+            question.rows = Array.from(rowIds).map((rId, idx) => ({
+              id: rId,
+              text: `Statement ${idx + 1}`, // Generic label as text is lost
+              uniqueOrder: idx,
+              columns: []
+            }));
+          }
+        }
+
+        // Fallback: Check for orphaned columns (IDs in response not matching survey columns)
+        if (question.columns && answeredCount > 0) {
+          const validColIds = new Set(question.columns.map((c: any) => String(c.id || c._id)));
+          // Also add uniqueOrder and value to valid set just in case
+          question.columns.forEach((c: any) => {
+            if (c.uniqueOrder) validColIds.add(String(c.uniqueOrder));
+            if (c.value) validColIds.add(String(c.value));
+
+            // Also check against generated hash if we have a stable ID
+            if (questionIdForRowCol) {
+              const colText = c.text || c.label || c.description || '';
+              // Try to match against what the hash WOULD be
+              // Note: We don't know the index easily here without iterating, but let's assume standard order
+              // This part is tricky for validation, but for recovery we focus on what's IN the response
+            }
+          });
+
+          const orphanedColIds = new Set<string>();
+          questionAnswers.forEach(a => {
+            const val = a.response;
+            if (Array.isArray(val)) {
+              val.forEach((v: any) => {
+                const cId = String(v.columnId || v.value);
+                if (cId && !validColIds.has(cId)) orphanedColIds.add(cId);
+              });
+            } else if (typeof val === 'object' && val !== null) {
+              if (val.columnId) {
+                const cId = String(val.columnId);
+                if (cId && !validColIds.has(cId)) orphanedColIds.add(cId);
+              } else {
+                Object.values(val).forEach((v: any) => {
+                  const cId = String(v);
+                  if (cId && !validColIds.has(cId)) orphanedColIds.add(cId);
+                });
+              }
+            }
+          });
+
+          if (orphanedColIds.size > 0) {
+            // Append recovered columns
+            const recoveredCols = Array.from(orphanedColIds).map((cId, idx) => ({
+              id: cId,
+              text: `Recovered Option ${idx + 1}`,
+              value: cId,
+              uniqueOrder: question.columns.length + idx,
+              count: 0
+            }));
+            question.columns = [...question.columns, ...recoveredCols];
+          }
+        }
+
         if (question.rows && question.columns) {
-          // Deep copy rows to avoid mutating the original survey object if it's cached/shared
-          // actually question is already a shallow copy from the map above, but rows need to be copied
+          // Deep copy rows to avoid mutating the original survey object
           question.rows = question.rows.map((r: any) => ({ ...r }));
 
-          question.rows.forEach((row: any) => {
+          question.rows.forEach((row: any, rowIdx: number) => {
             // Initialize columns with counts for this row
             row.columns = question.columns.map((col: any) => ({ ...col, count: 0 }));
+            row.score = []; // Initialize score array
 
-            // Iterate through all answers to this question
+            // Generate stable MD5 hash ID for row to match responses
+            const rowText = row.text || row.label || row.statement || `Statement ${rowIdx + 1}`;
+            const rowHash = crypto.createHash('md5')
+              .update(`${questionIdForRowCol}-row-${rowIdx}-${rowText}`)
+              .digest('hex');
+
+            // Iterate through all answers to count selections for this specific row
             questionAnswers.forEach(a => {
-              const val = a.response;
-              // Matrix response format can be complex. 
-              // Usually: { rowId: "...", columnId: "..." } or array of objects
-              // Or sometimes object map { "rowId": "colId" }
+              // Matrix response is typically an array of {rowId, columnId} objects
+              const responses = Array.isArray(a.response) ? a.response : (typeof a.response === 'object' && a.response !== null ? [a.response] : []);
 
-              if (Array.isArray(val)) {
-                // Check each item in the array
-                val.forEach((v: any) => {
-                  if (v && String(v.rowId) === String(row.id || row._id)) {
-                    const colId = String(v.columnId);
-                    const col = row.columns.find((c: any) => String(c.id || c._id) === colId);
-                    if (col) col.count++;
-                  }
+              // Find the specific answer entry for this row (matching by ID or Hash)
+              const matchedEntry = responses.find((r: any) =>
+                (r.rowId && (String(r.rowId) === String(row.id) || String(r.rowId) === String(row._id))) ||
+                (r.rowId && String(r.rowId) === rowHash)
+              );
+
+              if (matchedEntry) {
+                const colId = String(matchedEntry.columnId || matchedEntry.value);
+
+                // Find the corresponding column in our initialized columns list and increment count
+                const col = row.columns.find((c: any, cIdx: number) => {
+                  // Direct ID/Value match
+                  if (String(c.id) === colId || String(c._id) === colId || String(c.value) === colId) return true;
+                  if (c.uniqueOrder !== undefined && String(c.uniqueOrder) === colId) return true;
+
+                  // Hash-based match for consistency with stable ID generation
+                  const colText = c.text || c.label || c.description || '';
+                  const colHash = crypto.createHash('md5')
+                    .update(`${questionIdForRowCol}-column-${cIdx}-${colText}`)
+                    .digest('hex');
+
+                  return colHash === colId;
                 });
-              } else if (typeof val === 'object' && val !== null) {
-                // Check if it's a single object { rowId, columnId }
-                if (val.rowId && String(val.rowId) === String(row.id || row._id)) {
-                  const colId = String(val.columnId);
-                  const col = row.columns.find((c: any) => String(c.id || c._id) === colId);
-                  if (col) col.count++;
-                }
-                // Check if it's a map { rowId: colId }
-                else if (val[String(row.id || row._id)]) {
-                  const colId = String(val[String(row.id || row._id)]);
-                  const col = row.columns.find((c: any) => String(c.id || c._id) === colId);
-                  if (col) col.count++;
+
+                if (col) {
+                  col.count = (col.count || 0) + 1;
+                  if (col.weight !== undefined) {
+                    row.score.push(col.weight);
+                  }
                 }
               }
             });
+
+
           });
         }
       }

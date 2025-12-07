@@ -327,6 +327,42 @@ export class SurveyCollectorController {
       data: uniqueSurveys,
     };
   }
+
+  @Get(':surveyId/pages')
+  @Public()
+  @ApiOperation({ summary: 'Get Survey Pages for Collector' })
+  @ApiResponse({ status: 200, description: 'List of Survey Pages' })
+  async getPages(@Param('surveyId') surveyId: string) {
+    const pages = await this.surveyPagesService.findAll(surveyId);
+
+    // Process pages to ensure questionIds exist (similar to builder controller)
+    const processedPages = pages.map(page => {
+      const nonDeletedQuestions = page.questions.filter((q: any) => !q.isDeleted);
+      return {
+        id: page._id.toString(),
+        title: page.title,
+        description: page.description,
+        uniqueOrder: page.uniqueOrder,
+        surveyId: page.surveyId.toString(),
+        isDeleted: page.isDeleted,
+        questions: nonDeletedQuestions.map((q: any) => {
+          const questionObj = q.toObject ? q.toObject() : { ...q };
+          return {
+            ...questionObj,
+            id: q.questionId || questionObj.questionId || questionObj.id || q._id,
+            questionId: q.questionId || questionObj.questionId || questionObj.id || q._id,
+          };
+        }),
+      };
+    });
+
+    return {
+      statusCode: 200,
+      message: 'Survey Pages Found',
+      data: processedPages,
+    };
+  }
+
   @Get(':surveyId/:pageId?')
   @Public()
   @ApiOperation({ summary: 'Get Survey Collector (with or without pageId)' })
@@ -478,6 +514,10 @@ export class SurveyCollectorController {
     }
 
     if (!currentPage) {
+      this.logger.error(`Page not found. pageId: ${pageId}, pages count: ${pages.length}`);
+      if (pages.length > 0) {
+        this.logger.error(`First page ID: ${pages[0]._id}`);
+      }
       throw new Error('Page not found');
     }
 
