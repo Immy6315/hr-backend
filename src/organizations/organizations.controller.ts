@@ -52,7 +52,7 @@ export class OrganizationsController {
     private readonly emailService: EmailService,
     private readonly surveysService: SurveysService,
     private readonly templateDraftsService: SurveyTemplateDraftsService,
-  ) {}
+  ) { }
 
   private readonly logger = new Logger(OrganizationsController.name);
 
@@ -673,9 +673,9 @@ export class OrganizationsController {
       projectDetails,
       ratingScale: ratingScaleProvided
         ? ratingScale.map((entry) => ({
-            weight: entry.weight,
-            label: entry.label,
-          }))
+          weight: entry.weight,
+          label: entry.label,
+        }))
         : undefined,
     };
     this.logger.debug(
@@ -890,23 +890,23 @@ export class OrganizationsController {
     const questionOptions =
       optionsSource.length > 0
         ? optionsSource.map((option, index) => ({
-            text: option.label,
-            seqNo: index + 1,
-            uniqueOrder: index,
-            weight: option.weight,
-            value: (option.weight ?? index + 1).toString(),
-          }))
+          text: option.label,
+          seqNo: index + 1,
+          uniqueOrder: index,
+          weight: option.weight,
+          value: (option.weight ?? index + 1).toString(),
+        }))
         : [
-            { text: 'Yes', seqNo: 1, uniqueOrder: 0, weight: 1, value: '1' },
-            { text: 'No', seqNo: 2, uniqueOrder: 1, weight: 0, value: '0' },
-          ];
+          { text: 'Yes', seqNo: 1, uniqueOrder: 0, weight: 1, value: '1' },
+          { text: 'No', seqNo: 2, uniqueOrder: 1, weight: 0, value: '0' },
+        ];
 
     const ratingColumnsSource = questionOptions.length ? questionOptions : optionsSource;
 
     const ratingColumns = ratingColumnsSource.map((option: any, index: number) => ({
-        text: option.label || option.text,
+      text: option.label || option.text,
       uniqueOrder: (option.uniqueOrder ?? index).toString(),
-        seqNo: option.seqNo ?? index + 1,
+      seqNo: option.seqNo ?? index + 1,
       weight:
         typeof option.weight === 'number'
           ? option.weight
@@ -938,36 +938,35 @@ export class OrganizationsController {
       }));
 
       return {
-      text: competency,
-      type: 'MATRIX_RADIO_BOX',
-      displayFormat: 'matrix',
-      mandatoryEnabled: true,
-      columnRandomEnabled: false,
-      columnRandomizationType: null,
-      gridRows: statements.map((statement, rowIndex) => ({
-        text: statement,
-        uniqueOrder: rowIndex.toString(),
-      })),
+        text: competency,
+        type: 'MATRIX_RADIO_BOX',
+        displayFormat: 'matrix',
+        mandatoryEnabled: true,
+        columnRandomEnabled: false,
+        columnRandomizationType: null,
+        gridRows: statements.map((statement, rowIndex) => ({
+          text: statement,
+          uniqueOrder: rowIndex.toString(),
+        })),
         columns: normalizedColumns.map((column) => ({ ...column })),
         gridColumns: normalizedColumns.map((column) => ({ ...column })),
-      metadata: {
-        matrixRows: statements,
+        metadata: {
+          matrixRows: statements,
           matrixColumns: normalizedColumns.map((column) => column.text),
           ratingScale: normalizedColumns.map((column) => ({
-          label: column.text,
-          weight: column.weight,
+            label: column.text,
+            weight: column.weight,
             value: column.value,
-        })),
-      },
+          })),
+        },
         weightageEnabled: true,
         showWeightage: true,
-      uniqueOrder: index,
+        uniqueOrder: index,
       };
     });
 
     this.logger.debug(
-      `[SurveyUpload] Matrix questions generated: ${generated.length} competencies (rows processed: ${
-        matrix.length - 1
+      `[SurveyUpload] Matrix questions generated: ${generated.length} competencies (rows processed: ${matrix.length - 1
       })`,
     );
     return generated;
@@ -1010,8 +1009,7 @@ export class OrganizationsController {
     }, []);
 
     this.logger.debug(
-      `[SurveyUpload] Qualitative questions generated: ${generated.length} (rows processed: ${
-        matrix.length - 1
+      `[SurveyUpload] Qualitative questions generated: ${generated.length} (rows processed: ${matrix.length - 1
       })`,
     );
     return generated;
@@ -1110,9 +1108,18 @@ export class OrganizationsController {
       return undefined;
     }
 
-    const subjectLine = block.find((line) => line.toUpperCase().startsWith('SUBJECT'));
-    const subject = subjectLine ? subjectLine.replace(/subject\s*:?/i, '').trim() : marker;
-    const bodyLines = subjectLine ? block.filter((line) => line !== subjectLine) : block;
+    const subjectIndex = block.findIndex((line) => line.toUpperCase().startsWith('SUBJECT'));
+
+    let subject = marker;
+    let bodyLines = block;
+
+    if (subjectIndex !== -1) {
+      const subjectLine = block[subjectIndex];
+      subject = subjectLine.replace(/subject\s*:?/i, '').trim();
+      // Only keep lines AFTER the subject line, ignoring everything before it
+      bodyLines = block.slice(subjectIndex + 1);
+    }
+
     const textBody = bodyLines.join('\n');
     const htmlBody = bodyLines.map((line) => `<p>${this.escapeHtml(line)}</p>`).join('');
 
