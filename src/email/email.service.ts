@@ -378,10 +378,13 @@ If you didn’t request this change, you can ignore this email.
       let htmlBody = template?.html || template?.text || 'Default invitation HTML';
 
       // Replace variables
-      const { replaceTemplateVariables } = await import('../surveys/utils/email-template.util');
+      const { replaceTemplateVariables, textToHtml } = await import('../surveys/utils/email-template.util');
       subject = replaceTemplateVariables(subject, variables);
       textBody = replaceTemplateVariables(textBody, variables);
       htmlBody = replaceTemplateVariables(htmlBody, variables);
+
+      // Convert plain text to HTML with proper line breaks
+      htmlBody = textToHtml(htmlBody);
 
       // Use the 'Invitation to join' design style
       htmlBody = `
@@ -478,10 +481,13 @@ If you didn’t request this change, you can ignore this email.
       let textBody = template?.text || 'Default respondent invitation text';
       let htmlBody = template?.html || template?.text || 'Default respondent invitation HTML';
 
-      const { replaceTemplateVariables } = await import('../surveys/utils/email-template.util');
+      const { replaceTemplateVariables, textToHtml } = await import('../surveys/utils/email-template.util');
       subject = replaceTemplateVariables(subject, variables);
       textBody = replaceTemplateVariables(textBody, variables);
       htmlBody = replaceTemplateVariables(htmlBody, variables);
+
+      // Convert plain text to HTML with proper line breaks
+      htmlBody = textToHtml(htmlBody);
 
       // Use the 'Invitation to join' design style
       htmlBody = `
@@ -574,10 +580,13 @@ If you didn’t request this change, you can ignore this email.
       let textBody = template?.text || 'This is a reminder to complete your feedback.';
       let htmlBody = template?.html || template?.text || 'Default reminder HTML';
 
-      const { replaceTemplateVariables } = await import('../surveys/utils/email-template.util');
+      const { replaceTemplateVariables, textToHtml } = await import('../surveys/utils/email-template.util');
       subject = replaceTemplateVariables(subject, variables);
       textBody = replaceTemplateVariables(textBody, variables);
       htmlBody = replaceTemplateVariables(htmlBody, variables);
+
+      // Convert plain text to HTML with proper line breaks
+      htmlBody = textToHtml(htmlBody);
 
       htmlBody += `
         <div style="background: #fff7ed; border-radius: 12px; padding: 20px; margin: 24px 0; border: 1px solid #fed7aa;">
@@ -626,10 +635,13 @@ If you didn’t request this change, you can ignore this email.
       let textBody = template?.text || 'This is to inform you that the feedback invite has been cancelled.';
       let htmlBody = template?.html || template?.text || 'Default cancellation HTML';
 
-      const { replaceTemplateVariables } = await import('../surveys/utils/email-template.util');
+      const { replaceTemplateVariables, textToHtml } = await import('../surveys/utils/email-template.util');
       subject = replaceTemplateVariables(subject, variables);
       textBody = replaceTemplateVariables(textBody, variables);
       htmlBody = replaceTemplateVariables(htmlBody, variables);
+
+      // Convert plain text to HTML with proper line breaks
+      htmlBody = textToHtml(htmlBody);
 
       const emailMessage = {
         to: participant.respondentEmail,
@@ -674,10 +686,13 @@ If you didn’t request this change, you can ignore this email.
       let textBody = template?.text || 'Please log in to nominate your respondents.';
       let htmlBody = template?.html || template?.text || 'Default nomination HTML';
 
-      const { replaceTemplateVariables } = await import('../surveys/utils/email-template.util');
+      const { replaceTemplateVariables, textToHtml } = await import('../surveys/utils/email-template.util');
       subject = replaceTemplateVariables(subject, variables);
       textBody = replaceTemplateVariables(textBody, variables);
       htmlBody = replaceTemplateVariables(htmlBody, variables);
+
+      // Convert plain text to HTML with proper line breaks
+      htmlBody = textToHtml(htmlBody);
 
       // Append login button/link to HTML
       htmlBody += `

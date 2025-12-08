@@ -26,21 +26,43 @@ export function replaceTemplateVariables(
 
 /**
  * Convert plain text to HTML with proper formatting
+ * Groups consecutive lines into paragraphs, uses empty lines as paragraph breaks
  */
 export function textToHtml(text: string): string {
     if (!text) return '';
 
-    return text
-        .split('\n')
-        .map((line) => {
-            const trimmed = line.trim();
-            if (!trimmed) return '<br/>';
-            if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
-                return `<p><a href="${trimmed}">${trimmed}</a></p>`;
+    const lines = text.split('\n');
+    const paragraphs: string[] = [];
+    let currentParagraph: string[] = [];
+
+    for (const line of lines) {
+        const trimmed = line.trim();
+
+        if (!trimmed) {
+            // Empty line - end current paragraph
+            if (currentParagraph.length > 0) {
+                paragraphs.push(`<p>${currentParagraph.join('<br>')}</p>`);
+                currentParagraph = [];
             }
-            return `<p>${line}</p>`;
-        })
-        .join('\n');
+        } else if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+            // URL - add as link in its own paragraph
+            if (currentParagraph.length > 0) {
+                paragraphs.push(`<p>${currentParagraph.join('<br>')}</p>`);
+                currentParagraph = [];
+            }
+            paragraphs.push(`<p><a href="${trimmed}">${trimmed}</a></p>`);
+        } else {
+            // Regular line - add to current paragraph
+            currentParagraph.push(trimmed);
+        }
+    }
+
+    // Add any remaining paragraph
+    if (currentParagraph.length > 0) {
+        paragraphs.push(`<p>${currentParagraph.join('<br>')}</p>`);
+    }
+
+    return paragraphs.join('\n');
 }
 
 /**
